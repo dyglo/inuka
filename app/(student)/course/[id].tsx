@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,26 +8,61 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '../../../src/theme/colors';
 import { Spacing, Typography } from '../../../src/theme';
-import { ChevronLeft, Bookmark, Star, BookOpen, Play, ArrowRight, Clock } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  Bookmark,
+  Play,
+  ArrowRight,
+  Clock,
+  FileText,
+  CheckCircle,
+  Download,
+  MoreVertical,
+} from 'lucide-react-native';
 import * as FileSystem from 'expo-file-system';
-import { doc, getDoc } from 'firebase/firestore';
+import { 
+  doc, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  serverTimestamp, 
+  increment,
+  onSnapshot 
+} from 'firebase/firestore';
 import { db } from '../../../src/config/firebase';
+import { useAuth } from '../../../src/context/AuthContext';
+import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+
+const { width } = Dimensions.get('window');
 
 export default function CourseDetails() {
   const { id } = useLocalSearchParams();
+  const { user } = useAuth();
   const router = useRouter();
+  
   const [course, setCourse] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isEnrolled, setIsEnrolled] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
+  const [activeTab, setActiveTab] = useState<'about' | 'materials'>('about');
+  const [playing, setPlaying] = useState(false);
+  const [isVideoLoading, setIsVideoLoading] = useState(false);
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  
+  const videoRef = useRef<Video>(null);
+  const lastUpdateRef = useRef<number>(Date.now());
 
   useEffect(() => {
-    const fetchCourseDetails = async () => {
-      if (!id) return;
+    if (!id) return;
+    
+    const fetchCourse = async () => {
       try {
         const docRef = doc(db, 'courses', id as string);
         const docSnap = await getDoc(docRef);
@@ -39,55 +74,183 @@ export default function CourseDetails() {
         }
       } catch (error) {
         console.error('Error fetching course:', error);
-        Alert.alert('Error', 'Failed to load course details');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchCourseDetails();
-  }, [id, router]);
+    fetchCourse();
+
+    if (user) {
+      const enrollmentId = `${user.uid}_${id}`;
+      const unsubscribe = onSnapshot(doc(db, 'enrollments', enrollmentId), (doc) => {
+        setIsEnrolled(doc.exists());
+      });
+      return () => unsubscribe();
+    }
+  }, [id, user]);
+
+  const handleEnroll = async () => {
+    if (!user || !course) return;
+    
+    try {
+      const enrollmentId = `${user.uid}_${course.id}`;
+      const enrollmentRef = doc(db, 'enrollments', enrollmentId);
+      
+      await setDoc(enrollmentRef, {
+        userId: user.uid,
+        courseId: course.id,
+        enrolledAt: serverTimestamp(),
+        progress: 0,
+        watchedMinutes: 0,
+      });
+
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        enrolledCourseCount: increment(1)
+      });
+
+      Alert.alert('Enrolled!', 'You have successfully enrolled in this course.');
+    } catch (error) {
+      console.error('Enrollment error:', error);
+      Alert.alert('Error', 'Failed to enroll. Please try again.');
+    }
+  };
+
+  const saveDownloadMetadata = async (type: 'video' | 'pdf') => {
+    try {
+      const downloadsStr = await AsyncStorage.getItem('course_downloads');
+      const downloads = downloadsStr ? JSON.parse(downloadsStr) : {};
+      
+      if (!downloads[course.id]) {
+        downloads[course.id] = {
+          id: course.id,
+          title: course.title,
+          category: course.category,
+          timestamp: Date.now(),
+          files: []
+        };
+      }
+      
+      if (!downloads[course.id].files.includes(type)) {
+        downloads[course.id].files.push(type);
+      }
+      
+      await AsyncStorage.setItem('course_downloads', JSON.stringify(downloads));
+      return true;
+    } catch (e) {
+      console.error('Error saving metadata:', e);
+      return false;
+    }
+  };
 
   const handleDownload = async () => {
-    if (!course) return;
-    // @ts-ignore
-    const docDir = FileSystem.documentDirectory;
-    if (!docDir) {
-      Alert.alert('Error', 'Filesystem is not available');
+    if (!course || !course.pdfUrl) {
+      Alert.alert('Not Available', 'This course does not have a PDF material.');
       return;
     }
+    
+    const docDir = FileSystem.documentDirectory;
+    if (!docDir) return;
 
     setIsDownloading(true);
+    setShowDownloadMenu(false);
+    
     try {
-      const fileUrl =
-        course.fileUrl ||
-        'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf';
+      const pdfUri = course.pdfUrl?.startsWith('http') 
+        ? course.pdfUrl 
+        : `https://raw.githubusercontent.com/dyglo/inuka/test-data/public/materials/${course.pdfUrl || 'dummy.pdf'}`;
+
       const fileUri = docDir + `course_${id}_material.pdf`;
-
-      // @ts-ignore
+      console.log('Starting PDF download from:', pdfUri);
+      
       const downloadResumable = FileSystem.createDownloadResumable(
-        fileUrl,
+        pdfUri,
         fileUri,
-        {},
-        (downloadProgress: any) => {
-          const progress =
-            downloadProgress.totalBytesWritten /
-            downloadProgress.totalBytesExpectedToWrite;
-          console.log(`Download progress: ${(progress * 100).toFixed(0)}%`);
-        }
+        {}
       );
-
-      // @ts-ignore
+      
       const result = await downloadResumable.downloadAsync();
-      if (result) {
-        Alert.alert('Downloaded!', 'Material saved for offline use. Find it in the Downloads tab.');
+      
+      if (result && result.status === 200) {
+        await saveDownloadMetadata('pdf');
+        Alert.alert('Success', 'Material saved for offline use.');
         setIsBookmarked(true);
+      } else {
+        throw new Error('Download failed with status ' + (result?.status || 'unknown'));
       }
-    } catch (e) {
-      console.error(e);
-      Alert.alert('Error', 'Failed to download material.');
+    } catch (e: any) {
+      console.error('PDF Download Error:', e);
+      Alert.alert('Download Failed', e.message || 'Failed to download PDF.');
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const handleDownloadVideo = async () => {
+    if (!course || !course.videoUrl) {
+      Alert.alert('Not Available', 'This course does not have a video available for download.');
+      return;
+    }
+    
+    const docDir = FileSystem.documentDirectory;
+    if (!docDir) return;
+
+    setIsDownloading(true);
+    setShowDownloadMenu(false);
+    
+    try {
+      const videoUri = course.videoUrl?.startsWith('http') 
+        ? course.videoUrl 
+        : `https://raw.githubusercontent.com/dyglo/inuka/test-data/public/videos/${course.videoUrl}`;
+
+      const fileUri = docDir + `course_${id}_video.mp4`;
+      console.log('Starting Video download from:', videoUri);
+      
+      const downloadResumable = FileSystem.createDownloadResumable(
+        videoUri,
+        fileUri,
+        {}
+      );
+
+      const result = await downloadResumable.downloadAsync();
+      if (result && result.status === 200) {
+        await saveDownloadMetadata('video');
+        Alert.alert('Success', 'Video downloaded successfully!');
+      } else {
+        throw new Error('Download failed with status ' + (result?.status || 'unknown'));
+      }
+    } catch (e: any) {
+      console.error('Video Download Error:', e);
+      Alert.alert('Download Failed', 'Could not save video offline. Please check your connection.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const onPlaybackStatusUpdate = async (status: AVPlaybackStatus) => {
+    if (!status.isLoaded) return;
+    
+    if (status.isPlaying) {
+      const now = Date.now();
+      const diff = now - lastUpdateRef.current;
+      
+      if (diff >= 30000) {
+        lastUpdateRef.current = now;
+        if (user && isEnrolled) {
+          const enrollmentId = `${user.uid}_${course.id}`;
+          const enrollmentRef = doc(db, 'enrollments', enrollmentId);
+          const userRef = doc(db, 'users', user.uid);
+          
+          await updateDoc(enrollmentRef, {
+            watchedMinutes: increment(1)
+          });
+          
+          await updateDoc(userRef, {
+            totalLearningMinutes: increment(1)
+          });
+        }
+      }
     }
   };
 
@@ -103,107 +266,202 @@ export default function CourseDetails() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Header Image Section */}
-        <View style={styles.imageContainer}>
-          <Image
-            source={{
-              uri:
-                course.imageUrl ||
-                'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=600',
-            }}
-            style={styles.headerImage}
-            resizeMode="cover"
-          />
-          <View style={styles.imageOverlay} />
-
-          <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.actionButton} onPress={() => router.back()}>
-              <ChevronLeft color={Colors.white} size={24} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionButton, isBookmarked && styles.activeActionButton]}
-              onPress={handleDownload}
-              disabled={isDownloading}
+      <View style={styles.videoHeader}>
+        {playing ? (
+          <View style={styles.videoContainer}>
+            <Video
+              ref={videoRef}
+              source={{ 
+                uri: course.videoUrl?.startsWith('http') 
+                  ? course.videoUrl 
+                  : `https://raw.githubusercontent.com/dyglo/inuka/main/public/videos/${course.videoUrl}` 
+              }}
+              style={styles.video}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              progressUpdateIntervalMillis={500}
+              onPlaybackStatusUpdate={(status) => {
+                if (status.isLoaded) {
+                  setIsVideoLoading(status.isBuffering);
+                }
+                onPlaybackStatusUpdate(status);
+              }}
+              onLoadStart={() => setIsVideoLoading(true)}
+              onLoad={() => setIsVideoLoading(false)}
+              onError={(e) => {
+                console.error('Video Error:', e);
+                setIsVideoLoading(false);
+                Alert.alert('Error', 'Could not play video.');
+              }}
+              usePoster={true}
+              posterSource={{ uri: course.coverImageUrl || course.imageUrl }}
+              posterStyle={styles.videoPoster}
+            />
+            {isVideoLoading && (
+              <View style={styles.videoLoadingOverlay}>
+                <ActivityIndicator size="large" color={Colors.white} />
+                <Text style={styles.loadingText}>Loading Video...</Text>
+              </View>
+            )}
+            
+            {!isVideoLoading && (
+              <TouchableOpacity 
+                style={styles.fullscreenIconButton} 
+                onPress={() => videoRef.current?.presentFullscreenPlayer()}
+              >
+                <View style={styles.fullscreenIconBg}>
+                  <Text style={styles.fullscreenText}>⛶</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <View style={styles.imageContainer}>
+            <Image
+              source={{ uri: course.coverImageUrl || course.imageUrl || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=600' }}
+              style={styles.headerImage}
+              resizeMode="cover"
+            />
+            <View style={styles.imageOverlay} />
+            <TouchableOpacity 
+              style={styles.playButton} 
+              onPress={() => {
+                setPlaying(true);
+                setIsVideoLoading(true);
+              }}
             >
-              {isDownloading ? (
-                <ActivityIndicator size="small" color={Colors.white} />
-              ) : (
-                <Bookmark
-                  color={Colors.white}
-                  size={22}
-                  fill={isBookmarked ? Colors.white : 'transparent'}
-                />
-              )}
+              <View style={styles.playIconBg}>
+                <Play color={Colors.white} size={32} fill={Colors.white} />
+              </View>
             </TouchableOpacity>
           </View>
+        )}
+        
+        {/* Absolute Back Button - moved for better safety */}
+        {!isVideoLoading && (
+          <View style={styles.headerButtonRow}>
+            <TouchableOpacity 
+              style={styles.floatingBackButton} 
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ChevronLeft color={Colors.white} size={28} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.downloadButton} 
+              onPress={() => setShowDownloadMenu(!showDownloadMenu)}
+            >
+              <MoreVertical color={Colors.white} size={24} />
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.playButton}>
-            <Play color={Colors.white} size={28} fill={Colors.white} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Course Info */}
-        <View style={styles.infoContent}>
-          <View style={styles.statsRow}>
-            <View style={styles.statChip}>
-              <BookOpen size={12} color={Colors.textSecondary} />
-              <Text style={styles.statText}>12 Lectures</Text>
-            </View>
-            <View style={styles.statChip}>
-              <Text style={styles.statText}>150 Enrolled</Text>
-            </View>
-            <View style={styles.ratingChip}>
-              <Star size={12} color={Colors.accent} fill={Colors.accent} />
-              <Text style={styles.ratingText}>4.8</Text>
-            </View>
+            {showDownloadMenu && (
+              <View style={styles.downloadMenu}>
+                <TouchableOpacity style={styles.menuItem} onPress={handleDownloadVideo}>
+                  <Play size={18} color={Colors.primary} />
+                  <Text style={styles.menuItemText}>Download Video</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.menuItem} onPress={handleDownload}>
+                  <FileText size={18} color={Colors.primary} />
+                  <Text style={styles.menuItemText}>Download PDF</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
+        )}
+      </View>
 
-          {course.category && (
-            <View style={styles.categoryBadge}>
-              <Text style={styles.categoryText}>{course.category}</Text>
-            </View>
-          )}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.infoContent}>
+          <View style={styles.tabBar}>
+            <TouchableOpacity 
+              style={[styles.tab, activeTab === 'about' && styles.activeTab]} 
+              onPress={() => setActiveTab('about')}
+            >
+              <Text style={[styles.tabText, activeTab === 'about' && styles.activeTabText]}>About</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.tab, activeTab === 'materials' && styles.activeTab]} 
+              onPress={() => setActiveTab('materials')}
+            >
+              <Text style={[styles.tabText, activeTab === 'materials' && styles.activeTabText]}>Materials</Text>
+            </TouchableOpacity>
+          </View>
 
           <Text style={styles.title}>{course.title}</Text>
-
-          <View style={styles.instructorSection}>
-            <Image
-              source={{ uri: 'https://i.pravatar.cc/150?u=inuka' }}
-              style={styles.instructorAvatar}
-            />
+          
+          {activeTab === 'about' ? (
             <View>
-              <Text style={styles.instructorName}>Inuka Team</Text>
-              <Text style={styles.instructorTitle}>Expert Instructor</Text>
-            </View>
-          </View>
+              <View style={styles.tagRow}>
+                <View style={styles.categoryBadge}>
+                  <Text style={styles.categoryText}>{course.category || 'General'}</Text>
+                </View>
+                <View style={[styles.categoryBadge, { backgroundColor: Colors.surfaceLight }]}>
+                  <Text style={[styles.categoryText, { color: Colors.textSecondary }]}>Free</Text>
+                </View>
+              </View>
 
-          <Text style={styles.sectionLabel}>About this course</Text>
-          <Text style={styles.description}>{course.description}</Text>
+              <Text style={styles.sectionLabel}>About this course</Text>
+              <Text style={styles.description}>{course.description}</Text>
 
-          <View style={styles.accessCard}>
-            <View style={styles.accessIconBg}>
-              <Clock size={20} color={Colors.primary} />
+              <View style={styles.accessCard}>
+                <View style={styles.accessIconBg}>
+                  <Clock size={20} color={Colors.primary} />
+                </View>
+                <View>
+                  <Text style={styles.accessLabel}>Self-Paced Learning</Text>
+                  <Text style={styles.accessSub}>Lifetime Access granted</Text>
+                </View>
+              </View>
             </View>
-            <View>
-              <Text style={styles.accessLabel}>Self-Paced</Text>
-              <Text style={styles.accessSub}>Lifetime Access</Text>
+          ) : (
+            <View style={styles.materialsSection}>
+              {course.hasPdfMaterial ? (
+                <View style={styles.materialItem}>
+                  <View style={styles.materialIcon}>
+                    <FileText size={24} color={Colors.primary} />
+                  </View>
+                  <View style={styles.materialInfo}>
+                    <Text style={styles.materialName}>Course Material.pdf</Text>
+                    <Text style={styles.materialSize}>PDF • 2.4 MB</Text>
+                  </View>
+                  <TouchableOpacity 
+                    style={styles.downloadAction} 
+                    onPress={handleDownload}
+                    disabled={isDownloading}
+                  >
+                    {isDownloading ? (
+                      <ActivityIndicator size="small" color={Colors.primary} />
+                    ) : (
+                      <Bookmark size={20} color={isBookmarked ? Colors.success : Colors.primary} fill={isBookmarked ? Colors.success : 'transparent'} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.emptyMaterials}>
+                  <Text style={styles.emptyText}>No reading materials available for this course yet.</Text>
+                </View>
+              )}
             </View>
-          </View>
+          )}
         </View>
       </ScrollView>
 
-      {/* Footer Enroll Button */}
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.enrollButton}>
-          <View style={styles.enrollArrowBg}>
-            <ArrowRight size={18} color={Colors.white} />
+        {isEnrolled ? (
+          <View style={styles.enrolledStatus}>
+            <CheckCircle size={20} color={Colors.success} />
+            <Text style={styles.enrolledText}>You are enrolled</Text>
           </View>
-          <Text style={styles.enrollText}>Enroll Now</Text>
-        </TouchableOpacity>
-        <View style={styles.priceTag}>
-          <Text style={styles.priceText}>Free</Text>
-        </View>
+        ) : (
+          <TouchableOpacity style={styles.enrollButton} onPress={handleEnroll}>
+            <View style={styles.enrollArrowBg}>
+              <ArrowRight size={18} color={Colors.white} />
+            </View>
+            <Text style={styles.enrollBtnText}>Enroll Now</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -220,12 +478,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  videoHeader: {
+    height: 300,
+    backgroundColor: '#000',
+    position: 'relative',
+  },
+  video: {
+    width: '100%',
+    height: '100%',
+  },
   scrollContent: {
     paddingBottom: 110,
   },
   imageContainer: {
-    height: 320,
     width: '100%',
+    height: '100%',
     position: 'relative',
   },
   headerImage: {
@@ -248,7 +515,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  actionButton: {
+  backButton: {
     width: 44,
     height: 44,
     borderRadius: 14,
@@ -256,21 +523,135 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  activeActionButton: {
-    backgroundColor: Colors.primary,
-  },
   playButton: {
     position: 'absolute',
-    top: '38%',
-    alignSelf: 'center',
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -35 }, { translateY: -35 }],
+    zIndex: 10,
+  },
+  playIconBg: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(91, 60, 196, 0.9)', // Using primary color for a real button look
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 8,
     borderWidth: 2,
-    borderColor: Colors.white,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  videoContainer: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#000',
+    justifyContent: 'center',
+  },
+  videoLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  loadingText: {
+    color: Colors.white,
+    marginTop: 10,
+    ...Typography.bodySmall,
+    fontWeight: '600',
+  },
+  videoPoster: {
+    resizeMode: 'cover',
+  },
+  floatingBackButton: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.4)', // Slightly darker for better visibility
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 30, // Extremely High Z-index
+  },
+  headerActions: {
+    display: 'none', // Removed in favor of floatingBackButton
+  },
+  fullscreenIconButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    zIndex: 25,
+  },
+  fullscreenIconBg: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  fullscreenText: {
+    color: Colors.white,
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  headerButtonRow: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    zIndex: 35,
+  },
+  downloadButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(91, 60, 196, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  downloadMenu: {
+    position: 'absolute',
+    top: 60,
+    right: 0,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 8,
+    width: 180,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 10,
+    zIndex: 100,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 10,
+  },
+  menuItemText: {
+    ...Typography.bodySmall,
+    color: Colors.text,
+    fontWeight: '600',
   },
   infoContent: {
     padding: Spacing.lg,
@@ -279,92 +660,57 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
   },
-  statsRow: {
+  tabBar: {
     flexDirection: 'row',
-    marginBottom: Spacing.md,
-    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.glassBorder,
   },
-  statChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surfaceLight,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-    gap: 4,
+  tab: {
+    paddingVertical: 10,
+    marginRight: Spacing.lg,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  statText: {
-    ...Typography.caption,
+  activeTab: {
+    borderBottomColor: Colors.primary,
+  },
+  tabText: {
+    ...Typography.body,
     color: Colors.textSecondary,
     fontWeight: '600',
   },
-  ratingChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fefce8',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-    gap: 4,
-  },
-  ratingText: {
-    ...Typography.caption,
-    color: '#92400e',
-    fontWeight: '700',
-  },
-  categoryBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 20,
-    marginBottom: Spacing.sm,
-  },
-  categoryText: {
-    ...Typography.caption,
+  activeTabText: {
     color: Colors.primary,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   title: {
     ...Typography.h2,
     color: Colors.text,
     fontSize: 26,
     lineHeight: 34,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
-  instructorSection: {
+  tagRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    gap: Spacing.sm,
     marginBottom: Spacing.lg,
-    padding: Spacing.md,
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
   },
-  instructorAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    marginRight: 12,
-    borderWidth: 2,
-    borderColor: Colors.primaryLight,
+  categoryBadge: {
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20,
   },
-  instructorName: {
-    ...Typography.body,
-    color: Colors.text,
-    fontWeight: '600',
-  },
-  instructorTitle: {
+  categoryText: {
     ...Typography.caption,
-    color: Colors.textSecondary,
+    color: Colors.primary,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   sectionLabel: {
     ...Typography.label,
     color: Colors.textSecondary,
-    marginBottom: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   description: {
     ...Typography.bodySmall,
@@ -399,6 +745,52 @@ const styles = StyleSheet.create({
     ...Typography.caption,
     color: Colors.textSecondary,
   },
+  materialsSection: {
+    marginTop: Spacing.sm,
+  },
+  materialItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    padding: Spacing.md,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    marginBottom: Spacing.md,
+  },
+  materialIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: Spacing.md,
+  },
+  materialInfo: {
+    flex: 1,
+  },
+  materialName: {
+    ...Typography.body,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  materialSize: {
+    ...Typography.caption,
+    color: Colors.textSecondary,
+  },
+  downloadAction: {
+    padding: 8,
+  },
+  emptyMaterials: {
+    padding: Spacing.xl,
+    alignItems: 'center',
+  },
+  emptyText: {
+    ...Typography.bodySmall,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+  },
   footer: {
     position: 'absolute',
     bottom: 0,
@@ -406,32 +798,34 @@ const styles = StyleSheet.create({
     right: 0,
     height: 90,
     backgroundColor: Colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
+    justifyContent: 'center',
     borderTopWidth: 1,
     borderTopColor: Colors.glassBorder,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
     elevation: 8,
   },
   enrollButton: {
-    flex: 1,
     height: 56,
     backgroundColor: Colors.primary,
     borderRadius: 28,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    marginRight: Spacing.md,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 5,
+  },
+  enrolledStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 56,
+    backgroundColor: Colors.success + '15',
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: Colors.success + '30',
+  },
+  enrolledText: {
+    ...Typography.h3,
+    color: Colors.success,
+    marginLeft: 10,
   },
   enrollArrowBg: {
     width: 36,
@@ -441,22 +835,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  enrollText: {
+  enrollBtnText: {
     ...Typography.h3,
     color: Colors.white,
     flex: 1,
     textAlign: 'center',
     marginRight: 36,
-  },
-  priceTag: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: Colors.primaryLight,
-    borderRadius: 16,
-  },
-  priceText: {
-    ...Typography.h3,
-    color: Colors.primary,
-    fontWeight: '800',
   },
 });

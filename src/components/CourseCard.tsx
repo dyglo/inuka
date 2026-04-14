@@ -9,7 +9,8 @@ interface CourseCardProps {
     id: string;
     title: string;
     description?: string;
-    imageUrl?: string;
+    coverImageUrl?: string;
+    imageUrl?: string; // fallback for older docs
     category?: string;
     price?: string;
     duration?: string;
@@ -33,9 +34,9 @@ export const CourseCard: React.FC<CourseCardProps> = ({
       activeOpacity={0.85}
     >
       {/* Course image */}
-      {course.imageUrl ? (
+      {(course.coverImageUrl || course.imageUrl) ? (
         <Image
-          source={{ uri: course.imageUrl }}
+          source={{ uri: course.coverImageUrl || course.imageUrl }}
           style={[styles.image, featured ? styles.featureImage : styles.normalImage]}
           resizeMode="cover"
         />

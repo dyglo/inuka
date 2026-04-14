@@ -26,6 +26,7 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [adminCode, setAdminCode] = useState('');
 
   const handleRegister = async () => {
     if (!fullName || !email || !password || !confirmPassword) {
@@ -56,12 +57,19 @@ export default function RegisterScreen() {
       // Update display name
       await updateProfile(user, { displayName: fullName.trim() });
 
-      // Create Firestore user document with default role = 'student'
+      // Guarded admin role check
+      const isAdmin = adminCode.trim() === 'INUKA2026';
+      const role = isAdmin ? 'admin' : 'student';
+
+      // Create Firestore user document
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         fullName: fullName.trim(),
         email: email.trim().toLowerCase(),
-        role: 'student',
+        role: role,
+        avatarUrl: '',
+        enrolledCourseCount: 0,
+        totalLearningMinutes: 0,
         createdAt: serverTimestamp(),
       });
 
@@ -134,19 +142,32 @@ export default function RegisterScreen() {
             secureTextEntry
           />
 
+          <View style={styles.adminSection}>
+            <Input
+              label="Admin Access Code (Optional)"
+              placeholder="Enter code for admin access"
+              value={adminCode}
+              onChangeText={setAdminCode}
+              autoCapitalize="none"
+            />
+          </View>
+
           {error && <Text style={styles.errorText}>{error}</Text>}
 
-          <Button
-            title="Create Account"
+          <TouchableOpacity 
+            style={[styles.registerButton, loading && { opacity: 0.7 }]} 
             onPress={handleRegister}
-            loading={loading}
-            style={styles.registerButton}
-          />
+            disabled={loading}
+          >
+            <Text style={styles.registerButtonText}>
+              {loading ? 'Creating Account...' : 'Create Account'}
+            </Text>
+          </TouchableOpacity>
 
           <View style={styles.noteCard}>
             <Text style={styles.noteText}>
-              🎓 You'll be registered as a <Text style={styles.boldText}>Student</Text>.
-              {'\n'}Admin access is granted by an administrator.
+              🎓 Default role is <Text style={styles.boldText}>Student</Text>.
+              {'\n'}Admin access requires a valid access code.
             </Text>
           </View>
 
@@ -216,6 +237,20 @@ const styles = StyleSheet.create({
   registerButton: {
     marginTop: Spacing.lg,
     backgroundColor: Colors.primary,
+    height: 56,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  registerButtonText: {
+    color: Colors.white,
+    ...Typography.h3,
+  },
+  adminSection: {
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.surfaceVariant,
   },
   errorText: {
     color: Colors.error,

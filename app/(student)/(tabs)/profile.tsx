@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useAuth } from '../../../src/context/AuthContext';
 import { Colors } from '../../../src/theme/colors';
@@ -18,10 +20,71 @@ import {
   Clock,
   Award,
   User,
+  Camera,
 } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../../../src/config/firebase';
 
 export default function ProfileScreen() {
   const { signOut, user } = useAuth();
+  const [userData, setUserData] = useState<any>(null);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (doc) => {
+      if (doc.exists()) {
+        setUserData(doc.data());
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const handlePickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Denied', 'We need camera roll permissions to upload an avatar.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.5,
+    });
+
+    if (!result.canceled && result.assets && result.assets[0].uri) {
+      uploadAvatar(result.assets[0].uri);
+    }
+  };
+
+  const uploadAvatar = async (uri: string) => {
+    if (!user) return;
+    setUploading(true);
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const storageRef = ref(storage, `avatars/${user.uid}`);
+      await uploadBytes(storageRef, blob);
+      const downloadURL = await getDownloadURL(storageRef);
+
+      await updateDoc(doc(db, 'users', user.uid), {
+        avatarUrl: downloadURL,
+      });
+
+      Alert.alert('Success', 'Profile picture updated!');
+    } catch (error) {
+      console.error('Upload error:', error);
+      Alert.alert('Error', 'Failed to upload image.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const MENU_ITEMS = [
     { icon: GraduationCap, label: 'My Learning', color: Colors.primary },
@@ -42,14 +105,27 @@ export default function ProfileScreen() {
 
       {/* Profile card */}
       <View style={styles.profileCard}>
-        {user?.photoURL ? (
-          <Image source={{ uri: user.photoURL }} style={styles.avatar} />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <User size={40} color={Colors.white} />
-          </View>
-        )}
-        <Text style={styles.name}>{user?.displayName || 'Student'}</Text>
+        <View style={styles.avatarContainer}>
+          {userData?.avatarUrl ? (
+            <Image source={{ uri: userData.avatarUrl }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <User size={40} color={Colors.white} />
+            </View>
+          )}
+          <TouchableOpacity 
+            style={styles.cameraButton} 
+            onPress={handlePickImage}
+            disabled={uploading}
+          >
+            {uploading ? (
+              <ActivityIndicator size="small" color={Colors.white} />
+            ) : (
+              <Camera size={16} color={Colors.white} />
+            )}
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.name}>{userData?.fullName || user?.displayName || 'Student'}</Text>
         <Text style={styles.email}>{user?.email}</Text>
 
         <TouchableOpacity style={styles.editButton}>
@@ -60,11 +136,15 @@ export default function ProfileScreen() {
       {/* Stats row */}
       <View style={styles.statsRow}>
         <View style={styles.statBox}>
-          <Text style={styles.statValue}>0</Text>
+          <Text style={styles.statValue}>{userData?.enrolledCourseCount || 0}</Text>
           <Text style={styles.statLabel}>Courses</Text>
         </View>
         <View style={[styles.statBox, styles.statBoxMiddle]}>
-          <Text style={styles.statValue}>0h</Text>
+          <Text style={styles.statValue}>
+            {userData?.totalLearningMinutes >= 60 
+              ? `${Math.floor(userData.totalLearningMinutes / 60)}h ${Math.floor(userData.totalLearningMinutes % 60)}m`
+              : `${Math.floor(userData?.totalLearningMinutes || 0)}m`}
+          </Text>
           <Text style={styles.statLabel}>Learned</Text>
         </View>
         <View style={styles.statBox}>
@@ -137,11 +217,27 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
+  avatarContainer: {
+    position: 'relative',
+    marginBottom: Spacing.md,
+  },
+  cameraButton: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: Colors.surface,
+  },
   avatar: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    marginBottom: Spacing.md,
     borderWidth: 3,
     borderColor: Colors.primary,
   },

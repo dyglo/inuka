@@ -7,50 +7,65 @@ import {
   Image,
   TouchableOpacity,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Colors } from '../../../src/theme/colors';
 import { Spacing, Typography } from '../../../src/theme';
-import { Search, Bell, BookOpen, ArrowRight } from 'lucide-react-native';
+import { Search, Bell, BookOpen, ArrowRight, Play } from 'lucide-react-native'; // Fixed import and changed icons
 import { CourseCard } from '../../../src/components/CourseCard';
-import { collection, query, limit, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, limit, getDocs, orderBy, where } from 'firebase/firestore';
 import { db } from '../../../src/config/firebase';
 import { useAuth } from '../../../src/context/AuthContext';
 import { useRouter } from 'expo-router';
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { profile } = useAuth();
   const router = useRouter();
   const [courses, setCourses] = useState<any[]>([]);
-  const [featuredCourse, setFeaturedCourse] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeCategory, setActiveCategory] = useState('All');
 
   const categories = ['All', 'Software', 'Design', 'Business', 'Marketing'];
 
   useEffect(() => {
     fetchCourses();
-  }, []);
+  }, [activeCategory]);
 
   const fetchCourses = async () => {
     try {
-      const q = query(collection(db, 'courses'), orderBy('createdAt', 'desc'), limit(10));
+      let q;
+      if (activeCategory === 'All') {
+        q = query(collection(db, 'courses'), orderBy('createdAt', 'desc'), limit(15));
+      } else {
+        q = query(
+          collection(db, 'courses'), 
+          where('category', '==', activeCategory),
+          orderBy('createdAt', 'desc'), 
+          limit(15)
+        );
+      }
+      
       const querySnapshot = await getDocs(q);
       const fetchedCourses: any[] = [];
       querySnapshot.forEach((doc) => {
         fetchedCourses.push({ id: doc.id, ...doc.data() });
       });
       setCourses(fetchedCourses);
-      if (fetchedCourses.length > 0) {
-        setFeaturedCourse(fetchedCourses[0]);
-      }
     } catch (error) {
       console.error('Error fetching courses:', error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const firstName = user?.displayName?.split(' ')[0] || 'Student';
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchCourses();
+  };
+
+  const firstName = profile?.fullName?.split(' ')[0] || 'Student';
   const greeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good morning';
@@ -58,7 +73,9 @@ export default function Dashboard() {
     return 'Good evening';
   };
 
-  if (loading) {
+  const featuredCourse = courses.length > 0 ? courses[0] : null;
+
+  if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -67,24 +84,18 @@ export default function Dashboard() {
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.profileRow}>
-          <Image
-            source={{
-              uri:
-                user?.photoURL ||
-                `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                  user?.displayName || 'Student'
-                )}&background=5b3cc4&color=fff&size=150`,
-            }}
-            style={styles.avatar}
-          />
+          <TouchableOpacity onPress={() => router.push('/(student)/(tabs)/profile')}>
+            <Image
+              source={{
+                uri: profile?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.fullName || 'Student')}&background=5b3cc4&color=fff&size=150`,
+              }}
+              style={styles.avatar}
+            />
+          </TouchableOpacity>
           <View style={styles.headerIcons}>
             <TouchableOpacity style={styles.iconButton}>
               <Search color={Colors.textSecondary} size={20} />
@@ -101,98 +112,123 @@ export default function Dashboard() {
         </View>
       </View>
 
-      {/* Featured Course Banner */}
-      {featuredCourse && (
-        <TouchableOpacity
-          style={styles.featuredCard}
-          onPress={() => router.push(`/(student)/course/${featuredCourse.id}`)}
-          activeOpacity={0.9}
-        >
-          <Image
-            source={{
-              uri:
-                featuredCourse.imageUrl ||
-                'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=600',
-            }}
-            style={styles.featuredImage}
-            resizeMode="cover"
-          />
-          <View style={styles.featuredOverlay} />
-          <View style={styles.featuredContent}>
-            <View style={styles.featuredBadge}>
-              <BookOpen size={12} color={Colors.white} />
-              <Text style={styles.featuredBadgeText}>Featured</Text>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
+        }
+      >
+        {/* Featured Course Banner */}
+        {featuredCourse && activeCategory === 'All' && (
+          <TouchableOpacity
+            style={styles.featuredCard}
+            onPress={() => router.push(`/(student)/course/${featuredCourse.id}`)}
+            activeOpacity={0.9}
+          >
+            <Image
+              source={{
+                uri: featuredCourse.coverImageUrl || featuredCourse.imageUrl || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=600',
+              }}
+              style={styles.featuredImage}
+              resizeMode="cover"
+            />
+            <View style={styles.featuredOverlay} />
+            <View style={styles.featuredContent}>
+              <View style={styles.featuredBadge}>
+                <BookOpen size={12} color={Colors.white} />
+                <Text style={styles.featuredBadgeText}>MASTERCLASS</Text>
+              </View>
+              <Text style={styles.featuredTitle} numberOfLines={2}>
+                {featuredCourse.title}
+              </Text>
+              <View style={styles.featuredFooter}>
+                <Text style={styles.featuredCategory}>{featuredCourse.category || 'Featured'}</Text>
+                <TouchableOpacity
+                  style={styles.learnMoreButton}
+                  onPress={() => router.push(`/(student)/course/${featuredCourse.id}`)}
+                >
+                   <Text style={styles.learnMoreText}>Start Learning</Text>
+                   <ArrowRight size={14} color={Colors.text} />
+                </TouchableOpacity>
+              </View>
             </View>
-            <Text style={styles.featuredTitle} numberOfLines={2}>
-              {featuredCourse.title}
-            </Text>
-            <View style={styles.featuredFooter}>
-              <Text style={styles.featuredCategory}>{featuredCourse.category || 'Course'}</Text>
-              <TouchableOpacity
-                style={styles.bookNowButton}
-                onPress={() => router.push(`/(student)/course/${featuredCourse.id}`)}
+          </TouchableOpacity>
+        )}
+
+        {/* Categories */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Course Categories</Text>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categoriesScroll}
+          contentContainerStyle={{ paddingLeft: Spacing.lg, paddingRight: Spacing.lg }}
+        >
+          {categories.map((cat) => (
+            <TouchableOpacity
+              key={cat}
+              style={[styles.categoryChip, activeCategory === cat && styles.categoryChipActive]}
+              onPress={() => {
+                setLoading(true);
+                setActiveCategory(cat);
+              }}
+            >
+              <Text
+                style={[styles.categoryText, activeCategory === cat && styles.categoryTextActive]}
               >
-                <View style={styles.arrowBg}>
-                  <ArrowRight size={16} color={Colors.text} />
-                </View>
-                <Text style={styles.bookNowText}>Learn More</Text>
-              </TouchableOpacity>
+                {cat}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Course List */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>
+            {activeCategory === 'All' ? 'Recently Added' : `${activeCategory} Courses`}
+          </Text>
+          <TouchableOpacity onPress={() => router.push('/(student)/(tabs)/courses')}>
+            <Text style={styles.seeMore}>View All</Text>
+          </TouchableOpacity>
+        </View>
+        
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.coursesScroll}
+          contentContainerStyle={{ paddingLeft: Spacing.lg, paddingRight: Spacing.lg }}
+        >
+          {courses.map((course) => (
+            <CourseCard
+              key={course.id}
+              course={course}
+              onPress={() => router.push(`/(student)/course/${course.id}`)}
+            />
+          ))}
+          {courses.length === 0 && (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No courses found in this category.</Text>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Stats Motivation for MVP */}
+        <View style={styles.motivationSection}>
+          <View style={styles.motivationCard}>
+            <View style={styles.motivationTextContainer}>
+              <Text style={styles.motivationTitle}>Keep up the growth!</Text>
+              <Text style={styles.motivationSub}>You have {profile?.enrolledCourseCount || 0} active enrollments.</Text>
+            </View>
+            <View style={styles.motivationBadge}>
+              <Text style={styles.motivationPoints}>{profile?.totalLearningMinutes?.toFixed(0) || 0}</Text>
+              <Text style={styles.motivationLabel}>mins</Text>
             </View>
           </View>
-        </TouchableOpacity>
-      )}
-
-      {/* Categories */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Choose Category</Text>
-        <TouchableOpacity>
-          <Text style={styles.seeMore}>See More</Text>
-        </TouchableOpacity>
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.categoriesScroll}
-        contentContainerStyle={{ paddingRight: Spacing.lg }}
-      >
-        {categories.map((cat) => (
-          <TouchableOpacity
-            key={cat}
-            style={[styles.categoryChip, activeCategory === cat && styles.categoryChipActive]}
-            onPress={() => setActiveCategory(cat)}
-          >
-            <Text
-              style={[styles.categoryText, activeCategory === cat && styles.categoryTextActive]}
-            >
-              {cat}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        </View>
       </ScrollView>
-
-      {/* Course List */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Recent Courses</Text>
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.coursesScroll}
-        contentContainerStyle={{ paddingRight: Spacing.lg }}
-      >
-        {courses.map((course, index) => (
-          <CourseCard
-            key={course.id}
-            course={course}
-            onPress={() => router.push(`/(student)/course/${course.id}`)}
-            featured={index === 0}
-          />
-        ))}
-        {courses.length === 0 && (
-          <Text style={styles.emptyText}>No courses available yet.</Text>
-        )}
-      </ScrollView>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -202,7 +238,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    paddingBottom: 100,
+    paddingBottom: 110,
   },
   loadingContainer: {
     flex: 1,
@@ -225,9 +261,9 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 2,
     borderColor: Colors.primary,
   },
@@ -249,24 +285,25 @@ const styles = StyleSheet.create({
   greetingText: {
     ...Typography.bodySmall,
     color: Colors.textSecondary,
+    fontSize: 14,
   },
   welcomeTitle: {
     ...Typography.h2,
     color: Colors.text,
+    fontSize: 24,
   },
-  // Featured card
   featuredCard: {
     marginHorizontal: Spacing.lg,
-    marginTop: Spacing.xl,
-    borderRadius: 24,
+    marginTop: Spacing.lg,
+    borderRadius: 28,
     overflow: 'hidden',
-    height: 200,
+    height: 220,
     position: 'relative',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 14,
-    elevation: 6,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 8,
   },
   featuredImage: {
     width: '100%',
@@ -279,7 +316,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(15, 15, 30, 0.55)',
+    backgroundColor: 'rgba(15, 15, 30, 0.45)',
   },
   featuredContent: {
     position: 'absolute',
@@ -291,23 +328,28 @@ const styles = StyleSheet.create({
   featuredBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: Colors.accent,
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
+    paddingVertical: 5,
+    borderRadius: 8,
     marginBottom: Spacing.sm,
   },
   featuredBadgeText: {
-    color: Colors.white,
-    fontSize: 11,
-    fontWeight: '600',
+    color: Colors.text,
+    fontSize: 10,
+    fontWeight: '800',
     marginLeft: 4,
+    letterSpacing: 1,
   },
   featuredTitle: {
     ...Typography.h3,
     color: Colors.white,
+    fontSize: 22,
     marginBottom: Spacing.md,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: {width: -1, height: 1},
+    textShadowRadius: 10
   },
   featuredFooter: {
     flexDirection: 'row',
@@ -315,31 +357,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   featuredCategory: {
-    ...Typography.caption,
-    color: 'rgba(255,255,255,0.7)',
-    fontWeight: '600',
+    ...Typography.bodySmall,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '700',
     textTransform: 'uppercase',
   },
-  bookNowButton: {
+  learnMoreButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.accent,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-  },
-  arrowBg: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
     backgroundColor: Colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    gap: 6,
   },
-  bookNowText: {
-    ...Typography.bodySmall,
-    fontWeight: '700',
+  learnMoreText: {
+    ...Typography.caption,
+    fontWeight: '800',
     color: Colors.text,
   },
   sectionHeader: {
@@ -353,28 +387,28 @@ const styles = StyleSheet.create({
   sectionTitle: {
     ...Typography.h3,
     color: Colors.text,
+    fontSize: 18,
   },
   seeMore: {
     ...Typography.caption,
     color: Colors.primary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   categoriesScroll: {
-    paddingLeft: Spacing.lg,
     marginBottom: Spacing.md,
   },
   categoryChip: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     paddingVertical: 10,
-    borderRadius: 20,
+    borderRadius: 16,
     backgroundColor: Colors.surface,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: Colors.glassBorder,
     marginRight: Spacing.sm,
   },
   categoryChipActive: {
-    backgroundColor: Colors.accent,
-    borderColor: Colors.accent,
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   categoryText: {
     ...Typography.bodySmall,
@@ -382,17 +416,64 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   categoryTextActive: {
-    color: Colors.text,
+    color: Colors.white,
     fontWeight: '700',
   },
   coursesScroll: {
-    paddingLeft: Spacing.lg,
     marginBottom: Spacing.md,
+  },
+  emptyContainer: {
+    paddingVertical: 40,
+    paddingHorizontal: 20,
   },
   emptyText: {
     color: Colors.textSecondary,
     ...Typography.bodySmall,
     fontStyle: 'italic',
-    marginTop: Spacing.md,
+  },
+  motivationSection: {
+    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.xl,
+  },
+  motivationCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 24,
+    padding: Spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+  },
+  motivationTextContainer: {
+    flex: 1,
+  },
+  motivationTitle: {
+    ...Typography.h3,
+    color: Colors.text,
+    fontSize: 16,
+    marginBottom: 4,
+  },
+  motivationSub: {
+    ...Typography.bodySmall,
+    color: Colors.textSecondary,
+  },
+  motivationBadge: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  motivationPoints: {
+    ...Typography.h2,
+    color: Colors.primary,
+    fontSize: 20,
+  },
+  motivationLabel: {
+    ...Typography.caption,
+    fontSize: 10,
+    color: Colors.primary,
+    fontWeight: '700',
   },
 });

@@ -2,41 +2,58 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
 import { Colors } from '../../../src/theme/colors';
 import { Spacing, Typography } from '../../../src/theme';
-import { Download, FileText, Trash2, ExternalLink } from 'lucide-react-native';
+import { Download, FileText, Trash2, ExternalLink, Play, X } from 'lucide-react-native';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Video, ResizeMode } from 'expo-av';
+import { Modal, ScrollView } from 'react-native';
 
 interface OfflineFile {
+  id: string;
   name: string;
   uri: string;
+  type: 'video' | 'pdf';
   size: number;
 }
 
 export default function DownloadsScreen() {
   const [files, setFiles] = useState<OfflineFile[]>([]);
+  const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
 
   const loadFiles = async () => {
     try {
-      // @ts-ignore
       const docDir = FileSystem.documentDirectory;
       if (!docDir) return;
 
-      // @ts-ignore
-      const dirContents = await FileSystem.readDirectoryAsync(docDir);
-      const fileDetails = await Promise.all(
-        dirContents
-          .filter((name: string) => name.includes('course_'))
-          .map(async (name: string) => {
-            // @ts-ignore
-            const info = await FileSystem.getInfoAsync(docDir + name);
-            return {
-              name,
-              uri: docDir + name,
-              size: info.exists ? (info as any).size || 0 : 0,
-            };
-          })
-      );
-      setFiles(fileDetails);
+      const downloadsStr = await AsyncStorage.getItem('course_downloads');
+      if (!downloadsStr) {
+        setFiles([]);
+        return;
+      }
+
+      const downloads = JSON.parse(downloadsStr);
+      const fileList: OfflineFile[] = [];
+
+      for (const id in downloads) {
+        const course = downloads[id];
+        for (const type of course.files) {
+          const fileName = type === 'video' ? `course_${id}_video.mp4` : `course_${id}_material.pdf`;
+          const fileUri = docDir + fileName;
+          const info = await FileSystem.getInfoAsync(fileUri);
+          
+          if (info.exists) {
+            fileList.push({
+              id,
+              name: `${course.title} (${type === 'video' ? 'Video' : 'PDF'})`,
+              uri: fileUri,
+              type: type as 'video' | 'pdf',
+              size: (info as any).size || 0,
+            });
+          }
+        }
+      }
+      setFiles(fileList);
     } catch (e) {
       console.error(e);
     }
@@ -47,10 +64,14 @@ export default function DownloadsScreen() {
   }, []);
 
   const handleOpenFile = async (file: OfflineFile) => {
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(file.uri);
+    if (file.type === 'video') {
+      setSelectedVideo(file.uri);
     } else {
-      Alert.alert('Error', 'Sharing/Opening not available on this device');
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(file.uri);
+      } else {
+        Alert.alert('Error', 'Sharing/Opening not available on this device');
+      }
     }
   };
 
@@ -61,8 +82,21 @@ export default function DownloadsScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          // @ts-ignore
           await FileSystem.deleteAsync(file.uri);
+          
+          // Update metadata
+          const downloadsStr = await AsyncStorage.getItem('course_downloads');
+          if (downloadsStr) {
+            const downloads = JSON.parse(downloadsStr);
+            if (downloads[file.id]) {
+              downloads[file.id].files = downloads[file.id].files.filter((f: string) => f !== file.type);
+              if (downloads[file.id].files.length === 0) {
+                delete downloads[file.id];
+              }
+              await AsyncStorage.setItem('course_downloads', JSON.stringify(downloads));
+            }
+          }
+          
           loadFiles();
         },
       },
@@ -104,12 +138,16 @@ export default function DownloadsScreen() {
           renderItem={({ item }) => (
             <View style={styles.fileCard}>
               <View style={styles.fileInfo}>
-                <View style={styles.fileIconBg}>
-                  <FileText size={22} color={Colors.primary} />
+                <View style={[styles.fileIconBg, item.type === 'video' && styles.videoIconBg]}>
+                  {item.type === 'video' ? (
+                    <Play size={22} color={Colors.primary} fill={Colors.primary} />
+                  ) : (
+                    <FileText size={22} color={Colors.primary} />
+                  )}
                 </View>
                 <View style={styles.fileMeta}>
                   <Text style={styles.fileName} numberOfLines={1}>
-                    {item.name.replace('course_', '').replace('.pdf', '')}
+                    {item.name}
                   </Text>
                   <Text style={styles.fileSize}>{formatSize(item.size)}</Text>
                 </View>
@@ -134,6 +172,31 @@ export default function DownloadsScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {/* Offline Video Player Modal */}
+      <Modal
+        visible={!!selectedVideo}
+        animationType="fade"
+        onRequestClose={() => setSelectedVideo(null)}
+      >
+        <View style={styles.playerContainer}>
+          <TouchableOpacity 
+            style={styles.closePlayer} 
+            onPress={() => setSelectedVideo(null)}
+          >
+            <X color={Colors.white} size={30} />
+          </TouchableOpacity>
+          {selectedVideo && (
+            <Video
+              source={{ uri: selectedVideo }}
+              style={styles.offlineVideo}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+            />
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -260,5 +323,25 @@ const styles = StyleSheet.create({
     ...Typography.bodySmall,
     color: Colors.textSecondary,
     textAlign: 'center',
+    marginTop: Spacing.sm,
+  },
+  videoIconBg: {
+    backgroundColor: 'rgba(91, 60, 196, 0.15)',
+  },
+  playerContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+  },
+  closePlayer: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    padding: 10,
+  },
+  offlineVideo: {
+    width: '100%',
+    height: 300,
   },
 });

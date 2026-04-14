@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { Colors } from '../../../src/theme/colors';
 import { Spacing, Typography } from '../../../src/theme';
-import { Plus, Trash2, X, BookOpen } from 'lucide-react-native';
 import {
   collection,
   getDocs,
@@ -25,9 +24,13 @@ import {
   addDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db } from '../../../src/config/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../../../src/config/firebase';
 import { Input } from '../../../src/components/Input';
 import { Button } from '../../../src/components/Button';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { Plus, Trash2, X, BookOpen, Video, FileText, Image as ImageIcon, CheckCircle, Upload } from 'lucide-react-native';
 
 export default function ManageCoursesScreen() {
   const [courses, setCourses] = useState<any[]>([]);
@@ -40,6 +43,66 @@ export default function ManageCoursesScreen() {
   const [description, setDescription] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // File states
+  const [selectedVideo, setSelectedVideo] = useState<any>(null);
+  const [selectedPdf, setSelectedPdf] = useState<any>(null);
+  const [selectedImage, setSelectedImage] = useState<any>(null);
+
+  const pickVideo = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'video/*',
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled) {
+        setSelectedVideo(result.assets[0]);
+      }
+    } catch (err) {
+      console.error('Error picking video:', err);
+    }
+  };
+
+  const pickPdf = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled) {
+        setSelectedPdf(result.assets[0]);
+      }
+    } catch (err) {
+      console.error('Error picking PDF:', err);
+    }
+  };
+
+  const pickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        setSelectedImage(result.assets[0]);
+      }
+    } catch (err) {
+      console.error('Error picking image:', err);
+    }
+  };
+
+  const uploadFile = async (uri: string, path: string) => {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const storageRef = ref(storage, path);
+    await uploadBytes(storageRef, blob);
+    return await getDownloadURL(storageRef);
+  };
 
   useEffect(() => {
     fetchCourses();
@@ -69,25 +132,53 @@ export default function ManageCoursesScreen() {
       return;
     }
 
+    if (!selectedVideo) {
+      Alert.alert('Video Required', 'Please select a course video file');
+      return;
+    }
+
     setSubmitting(true);
     try {
+      const timestamp = Date.now();
+      let finalVideoUrl = '';
+      let finalPdfUrl = '';
+      let finalCoverUrl = imageUrl || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=600';
+
+      // 1. Upload Video
+      console.log('Uploading video...');
+      finalVideoUrl = await uploadFile(selectedVideo.uri, `courses/videos/${timestamp}_${selectedVideo.name || 'video.mp4'}`);
+
+      // 2. Upload PDF if exists
+      if (selectedPdf) {
+        console.log('Uploading PDF...');
+        finalPdfUrl = await uploadFile(selectedPdf.uri, `courses/materials/${timestamp}_${selectedPdf.name || 'material.pdf'}`);
+      }
+
+      // 3. Upload Image if exists
+      if (selectedImage) {
+        console.log('Uploading cover image...');
+        finalCoverUrl = await uploadFile(selectedImage.uri, `courses/covers/${timestamp}_cover.jpg`);
+      }
+
+      // 4. Save to Firestore
       await addDoc(collection(db, 'courses'), {
         title,
         category,
         description,
-        imageUrl:
-          imageUrl ||
-          'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=600',
+        coverImageUrl: finalCoverUrl,
+        videoUrl: finalVideoUrl,
+        hasPdfMaterial: !!selectedPdf,
+        pdfUrl: finalPdfUrl,
         createdAt: serverTimestamp(),
       });
 
-      Alert.alert('Success', 'Course added successfully');
+      Alert.alert('Success', 'Course created and media uploaded successfully');
       setModalVisible(false);
       resetForm();
       fetchCourses();
     } catch (error) {
       console.error('Error adding course:', error);
-      Alert.alert('Error', 'Failed to add course');
+      Alert.alert('Error', 'Failed to add course or upload media');
     } finally {
       setSubmitting(false);
     }
@@ -98,6 +189,9 @@ export default function ManageCoursesScreen() {
     setCategory('');
     setDescription('');
     setImageUrl('');
+    setSelectedVideo(null);
+    setSelectedPdf(null);
+    setSelectedImage(null);
   };
 
   const handleDelete = async (id: string) => {
@@ -210,8 +304,71 @@ export default function ManageCoursesScreen() {
                 onChangeText={setCategory}
                 autoCapitalize="words"
               />
+              <Text style={styles.inputLabel}>Media Selection</Text>
+              
+              <View style={styles.uploadSection}>
+                {/* Image Picker */}
+                <TouchableOpacity 
+                  style={[styles.pickerButton, selectedImage && styles.pickerButtonActive]} 
+                  onPress={pickImage}
+                >
+                  <View style={styles.pickerIconBg}>
+                    <ImageIcon size={20} color={selectedImage ? Colors.white : Colors.primary} />
+                  </View>
+                  <View style={styles.pickerInfo}>
+                    <Text style={[styles.pickerLabel, selectedImage && styles.pickerLabelActive]}>
+                      {selectedImage ? 'Image Selected' : 'Cover Image'}
+                    </Text>
+                    <Text style={styles.pickerSub} numberOfLines={1}>
+                      {selectedImage ? 'Tapped to change' : '16:9 Aspect Ratio recommended'}
+                    </Text>
+                  </View>
+                  {selectedImage && <CheckCircle size={18} color={Colors.white} />}
+                </TouchableOpacity>
+
+                {/* Video Picker */}
+                <TouchableOpacity 
+                  style={[styles.pickerButton, selectedVideo && styles.pickerButtonActive]} 
+                  onPress={pickVideo}
+                >
+                  <View style={styles.pickerIconBg}>
+                    <Video size={20} color={selectedVideo ? Colors.white : Colors.primary} />
+                  </View>
+                  <View style={styles.pickerInfo}>
+                    <Text style={[styles.pickerLabel, selectedVideo && styles.pickerLabelActive]}>
+                      {selectedVideo ? 'Video Ready' : 'Course Video *'}
+                    </Text>
+                    <Text style={styles.pickerSub} numberOfLines={1}>
+                      {selectedVideo ? selectedVideo.name : 'MP4 or MOV recommended'}
+                    </Text>
+                  </View>
+                  {selectedVideo && <CheckCircle size={18} color={Colors.white} />}
+                </TouchableOpacity>
+
+                {/* PDF Picker */}
+                <TouchableOpacity 
+                  style={[styles.pickerButton, selectedPdf && styles.pickerButtonActive]} 
+                  onPress={pickPdf}
+                >
+                  <View style={styles.pickerIconBg}>
+                    <FileText size={20} color={selectedPdf ? Colors.white : Colors.primary} />
+                  </View>
+                  <View style={styles.pickerInfo}>
+                    <Text style={[styles.pickerLabel, selectedPdf && styles.pickerLabelActive]}>
+                      {selectedPdf ? 'PDF Attached' : 'Course PDF (Optional)'}
+                    </Text>
+                    <Text style={styles.pickerSub} numberOfLines={1}>
+                      {selectedPdf ? selectedPdf.name : 'Reading material for students'}
+                    </Text>
+                  </View>
+                  {selectedPdf && <CheckCircle size={18} color={Colors.white} />}
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ height: Spacing.md }} />
+              
               <Input
-                label="Image URL (Optional)"
+                label="Manual Image URL (Fallback)"
                 placeholder="https://images.unsplash.com/..."
                 value={imageUrl}
                 onChangeText={setImageUrl}
@@ -391,12 +548,63 @@ const styles = StyleSheet.create({
   },
   modalForm: {},
   createButton: {
-    marginTop: Spacing.md,
+    marginTop: Spacing.lg,
     backgroundColor: Colors.primary,
+    height: 56,
+    borderRadius: 18,
     shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 5,
+  },
+  inputLabel: {
+    ...Typography.bodySmall,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: Spacing.sm,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  uploadSection: {
+    gap: Spacing.sm,
+  },
+  pickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceLight,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+  },
+  pickerButtonActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  pickerIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(91, 60, 196, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  pickerInfo: {
+    flex: 1,
+  },
+  pickerLabel: {
+    ...Typography.bodySmall,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  pickerLabelActive: {
+    color: Colors.white,
+  },
+  pickerSub: {
+    ...Typography.caption,
+    color: Colors.textSecondary,
+    fontSize: 11,
   },
 });

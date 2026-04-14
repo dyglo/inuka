@@ -1,12 +1,24 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User, signOut as firebaseSignOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
 export type Role = 'student' | 'admin' | null;
 
+interface UserProfile {
+  uid: string;
+  fullName: string;
+  email: string;
+  role: Role;
+  avatarUrl: string;
+  enrolledCourseCount: number;
+  totalLearningMinutes: number;
+  createdAt?: any;
+}
+
 interface AuthContextType {
   user: User | null;
+  profile: UserProfile | null;
   role: Role;
   loading: boolean;
   signOut: () => Promise<void>;
@@ -16,51 +28,63 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<Role>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubscribeProfile: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
 
       if (firebaseUser) {
-        await fetchOrCreateRole(firebaseUser);
+        // Start profile sync
+        unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), async (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data() as UserProfile;
+            setProfile(data);
+            setRole(data.role);
+            setLoading(false);
+          } else {
+            // Document might not exist yet if just registered, create it
+            await initializeUserDoc(firebaseUser);
+          }
+        });
       } else {
+        setProfile(null);
         setRole(null);
         setLoading(false);
+        if (unsubscribeProfile) unsubscribeProfile();
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeProfile) unsubscribeProfile();
+    };
   }, []);
 
-  /**
-   * Fetches role from Firestore. If no user doc exists (e.g. Google sign-in or
-   * data race on new registration), creates a default 'student' document.
-   */
-  const fetchOrCreateRole = async (firebaseUser: User) => {
+  const initializeUserDoc = async (firebaseUser: User) => {
     try {
-      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        setRole((data.role as Role) || 'student');
-      } else {
-        // No Firestore doc yet — create one with default student role
-        console.warn('No Firestore user doc found — creating default student record');
-        await setDoc(doc(db, 'users', firebaseUser.uid), {
+      const userRef = doc(db, 'users', firebaseUser.uid);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        const newProfile: UserProfile = {
           uid: firebaseUser.uid,
           fullName: firebaseUser.displayName || '',
           email: firebaseUser.email || '',
           role: 'student',
+          avatarUrl: firebaseUser.photoURL || '',
+          enrolledCourseCount: 0,
+          totalLearningMinutes: 0,
           createdAt: serverTimestamp(),
-        });
-        setRole('student');
+        };
+        await setDoc(userRef, newProfile);
       }
     } catch (error) {
-      console.error('Error fetching user role:', error);
-      setRole('student'); // Fail safe: default to student
-    } finally {
-      setLoading(false);
+      console.error('Error initializing user doc:', error);
     }
   };
 
@@ -73,7 +97,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, role, loading, signOut }}>
+    <AuthContext.Provider value={{ user, profile, role, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   );
