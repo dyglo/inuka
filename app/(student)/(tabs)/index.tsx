@@ -91,7 +91,7 @@ export default function Dashboard() {
           <TouchableOpacity onPress={() => router.push('/(student)/(tabs)/profile')}>
             <Image
               source={{
-                uri: profile?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.fullName || 'Student')}&background=5b3cc4&color=fff&size=150`,
+                uri: profile?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.fullName || 'Student')}&background=1a73e8&color=fff&size=150`,
               }}
               style={styles.avatar}
             />

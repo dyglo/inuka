@@ -376,12 +376,12 @@ export default function ManageCoursesScreen() {
               />
               <Input
                 label="Description *"
-                placeholder="Brief overview of the course..."
+                placeholder="Enter a detailed description of what students will learn in this course. Include key topics, skills covered, and learning outcomes."
                 value={description}
                 onChangeText={setDescription}
                 multiline
-                numberOfLines={4}
-                style={{ height: 100, textAlignVertical: 'top', paddingTop: 12 }}
+                numberOfLines={6}
+                style={{ height: 130, textAlignVertical: 'top', paddingTop: 14, paddingBottom: 14, lineHeight: 22 }}
               />
 
               <Button
@@ -586,7 +586,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(91, 60, 196, 0.12)',
+    backgroundColor: 'rgba(26, 115, 232, 0.12)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,

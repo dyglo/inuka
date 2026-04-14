@@ -30,12 +30,13 @@ function RootLayoutNav() {
     const inAuthGroup = segments[0] === '(auth)';
     const inStudentGroup = segments[0] === '(student)';
     const inAdminGroup = segments[0] === '(admin)';
+    const onOnboarding = segments.length === 0 || segments[0] === undefined;
 
-    if (!user && !inAuthGroup) {
-      // Not authenticated → go to login
+    if (!user && !inAuthGroup && !onOnboarding) {
+      // Not authenticated and trying to access protected routes → go to login
       router.replace('/login');
-    } else if (user && inAuthGroup) {
-      // Authenticated and trying to access auth screens
+    } else if (user && (inAuthGroup || onOnboarding)) {
+      // Authenticated and on auth or onboarding screen → redirect to dashboard
       if (role === 'admin') {
         router.replace('/(admin)/(tabs)');
       } else if (role === 'student') {

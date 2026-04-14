@@ -1,8 +1,8 @@
 export const Colors = {
   // Brand
-  primary: '#5b3cc4',        // Inuka purple
-  primaryLight: '#ede9fb',   // Soft purple tint for backgrounds
-  secondary: '#7c5dfa',      // Slightly lighter purple
+  primary: '#1a73e8',        // Inuka blue
+  primaryLight: '#e8f0fe',   // Soft blue tint for backgrounds
+  secondary: '#4285f4',      // Slightly lighter blue
   accent: '#c9f542',         // Lime yellow-green (from design reference)
   accentDark: '#9dbf10',     // Darker accent for contrast
 

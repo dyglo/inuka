@@ -26,7 +26,7 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [adminCode, setAdminCode] = useState('');
+
 
   const handleRegister = async () => {
     if (!fullName || !email || !password || !confirmPassword) {
@@ -57,9 +57,8 @@ export default function RegisterScreen() {
       // Update display name
       await updateProfile(user, { displayName: fullName.trim() });
 
-      // Guarded admin role check
-      const isAdmin = adminCode.trim() === 'INUKA2026';
-      const role = isAdmin ? 'admin' : 'student';
+      // Student-only public registration
+      const role = 'student';
 
       // Create Firestore user document
       await setDoc(doc(db, 'users', user.uid), {
@@ -142,15 +141,7 @@ export default function RegisterScreen() {
             secureTextEntry
           />
 
-          <View style={styles.adminSection}>
-            <Input
-              label="Admin Access Code (Optional)"
-              placeholder="Enter code for admin access"
-              value={adminCode}
-              onChangeText={setAdminCode}
-              autoCapitalize="none"
-            />
-          </View>
+
 
           {error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -164,12 +155,7 @@ export default function RegisterScreen() {
             </Text>
           </TouchableOpacity>
 
-          <View style={styles.noteCard}>
-            <Text style={styles.noteText}>
-              🎓 Default role is <Text style={styles.boldText}>Student</Text>.
-              {'\n'}Admin access requires a valid access code.
-            </Text>
-          </View>
+
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Already have an account? </Text>
@@ -191,7 +177,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: Spacing.lg,
-    paddingTop: 60,
+    paddingTop: 52,
   },
   backButton: {
     marginBottom: Spacing.lg,
@@ -246,12 +232,6 @@ const styles = StyleSheet.create({
     color: Colors.white,
     ...Typography.h3,
   },
-  adminSection: {
-    marginTop: Spacing.md,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.surfaceVariant,
-  },
   errorText: {
     color: Colors.error,
     ...Typography.bodySmall,
@@ -260,23 +240,6 @@ const styles = StyleSheet.create({
     padding: Spacing.sm,
     backgroundColor: 'rgba(239, 68, 68, 0.08)',
     borderRadius: 12,
-  },
-  noteCard: {
-    marginTop: Spacing.lg,
-    padding: Spacing.md,
-    backgroundColor: Colors.primaryLight,
-    borderRadius: 16,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.primary,
-  },
-  noteText: {
-    ...Typography.bodySmall,
-    color: Colors.text,
-    lineHeight: 22,
-  },
-  boldText: {
-    fontWeight: '700',
-    color: Colors.primary,
   },
   footer: {
     flexDirection: 'row',

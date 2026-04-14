@@ -48,13 +48,24 @@ export default function OnboardingScreen() {
             {/* CTA button */}
             <TouchableOpacity
               style={styles.button}
-              onPress={() => router.push('/login')}
+              onPress={() => router.push('/register')}
               activeOpacity={0.85}
             >
               <Text style={styles.buttonText}>Get Started</Text>
               <View style={styles.arrowBg}>
                 <ArrowRight size={18} color={Colors.text} />
               </View>
+            </TouchableOpacity>
+
+            {/* Existing user link */}
+            <TouchableOpacity
+              style={styles.signInLink}
+              onPress={() => router.push('/login')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.signInText}>
+                Already have an account? <Text style={styles.signInBold}>Sign In</Text>
+              </Text>
             </TouchableOpacity>
           </View>
         </LinearGradient>
@@ -150,5 +161,18 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  signInLink: {
+    marginTop: Spacing.lg,
+    alignSelf: 'flex-start',
+  },
+  signInText: {
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  signInBold: {
+    color: Colors.white,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
 });

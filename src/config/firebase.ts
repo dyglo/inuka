@@ -28,25 +28,15 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 // Initialize Auth with cross-platform persistence
 let auth: ReturnType<typeof getAuth>;
 
-if (getApps().length > 0) {
-  try {
-    auth = getAuth(app);
-  } catch (e) {
-    // If not yet initialized, use initializeAuth below
-    auth = initAuth();
-  }
-} else {
-  auth = initAuth();
-}
-
-function initAuth() {
-  const persistence = Platform.OS === 'web' 
-    ? browserLocalPersistence 
-    : getReactNativePersistence(AsyncStorage);
-    
-  return initializeAuth(app, {
-    persistence,
+try {
+  auth = initializeAuth(app, {
+    persistence: Platform.OS === 'web' 
+      ? browserLocalPersistence 
+      : getReactNativePersistence(AsyncStorage)
   });
+} catch (error: any) {
+  // If already initialized, just get the instance
+  auth = getAuth(app);
 }
 
 const db = getFirestore(app);

@@ -9,15 +9,25 @@ interface InputProps extends TextInputProps {
   containerStyle?: ViewStyle;
 }
 
-export const Input: React.FC<InputProps> = ({ label, error, containerStyle, ...props }) => {
+export const Input: React.FC<InputProps> = ({ label, error, containerStyle, style, multiline, ...props }) => {
   return (
     <View style={[styles.container, containerStyle]}>
       {label && <Text style={styles.label}>{label}</Text>}
-      <View style={[styles.inputContainer, error ? styles.inputError : null]}>
+      <View style={[
+        styles.inputContainer, 
+        error ? styles.inputError : null,
+        multiline ? styles.multilineContainer : null,
+      ]}>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input, 
+            multiline ? styles.multilineInput : null,
+            style,
+          ]}
           placeholderTextColor={Colors.textMuted}
           autoCapitalize="none"
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : 'auto'}
           {...props}
         />
       </View>
@@ -51,6 +61,16 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: Colors.error,
+  },
+  multilineContainer: {
+    height: 'auto',
+    minHeight: 56,
+    paddingVertical: Spacing.sm,
+  },
+  multilineInput: {
+    minHeight: 80,
+    paddingTop: 4,
+    lineHeight: 22,
   },
   errorText: {
     ...Typography.caption,

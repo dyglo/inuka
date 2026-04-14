@@ -7,7 +7,6 @@ import {
   Platform,
   ScrollView,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Button } from '../../src/components/Button';
@@ -15,8 +14,7 @@ import { Input } from '../../src/components/Input';
 import { Colors } from '../../src/theme/colors';
 import { Spacing, Typography } from '../../src/theme';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, writeBatch, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../../src/config/firebase';
+import { auth } from '../../src/config/firebase';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -51,54 +49,6 @@ export default function LoginScreen() {
     }
   };
 
-  const seedData = async () => {
-    setLoading(true);
-    try {
-      const batch = writeBatch(db);
-
-      const courses = [
-        {
-          id: 'course_1',
-          title: 'Introduction to Mobile Development',
-          description: 'Learn the basics of React Native and Expo. Build cross-platform mobile apps with confidence.',
-          imageUrl: 'https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&q=80&w=600',
-          createdBy: 'admin_1',
-          createdAt: serverTimestamp(),
-          category: 'Software',
-        },
-        {
-          id: 'course_2',
-          title: 'Advanced UI Design',
-          description: 'Master modern design patterns including glassmorphism, animations, and dark/light modes.',
-          imageUrl: 'https://images.unsplash.com/photo-1558655146-d09347e92766?auto=format&fit=crop&q=80&w=600',
-          createdBy: 'admin_1',
-          createdAt: serverTimestamp(),
-          category: 'Design',
-        },
-        {
-          id: 'course_3',
-          title: 'Business Communication',
-          description: 'Develop professional writing and speaking skills for modern business environments.',
-          imageUrl: 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&q=80&w=600',
-          createdBy: 'admin_1',
-          createdAt: serverTimestamp(),
-          category: 'Business',
-        },
-      ];
-
-      courses.forEach((course) => {
-        batch.set(doc(db, 'courses', course.id), course);
-      });
-
-      await batch.commit();
-      Alert.alert('Success', 'Sample courses seeded to Firestore!');
-    } catch (err: any) {
-      console.error(err);
-      Alert.alert('Error', 'Failed to seed data: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <KeyboardAvoidingView
@@ -153,19 +103,6 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Admin Tools</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <TouchableOpacity style={styles.seedButton} onPress={seedData}>
-            <Text style={styles.seedButtonText}>🌱 Seed Sample Courses</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.noteText}>
-            Admin roles must be set in Firestore "users" collection (role: "admin").
-          </Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -258,42 +195,5 @@ const styles = StyleSheet.create({
     ...Typography.bodySmall,
     color: Colors.primary,
     fontWeight: '700',
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: Spacing.xl,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.glassBorder,
-  },
-  dividerText: {
-    ...Typography.caption,
-    color: Colors.textMuted,
-    marginHorizontal: Spacing.md,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  seedButton: {
-    padding: Spacing.md,
-    backgroundColor: Colors.surfaceLight,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-  },
-  seedButtonText: {
-    color: Colors.textSecondary,
-    ...Typography.bodySmall,
-    fontWeight: '600',
-  },
-  noteText: {
-    ...Typography.caption,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    marginTop: Spacing.md,
-    fontStyle: 'italic',
   },
 });

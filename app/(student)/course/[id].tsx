@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,7 +26,7 @@ import {
   Download,
   MoreVertical,
 } from 'lucide-react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { 
   doc, 
   getDoc, 
@@ -122,18 +123,20 @@ export default function CourseDetails() {
       const downloadsStr = await AsyncStorage.getItem('course_downloads');
       const downloads = downloadsStr ? JSON.parse(downloadsStr) : {};
       
-      if (!downloads[course.id]) {
-        downloads[course.id] = {
-          id: course.id,
-          title: course.title,
-          category: course.category,
+      const courseId = course?.id || (id as string);
+      
+      if (!downloads[courseId]) {
+        downloads[courseId] = {
+          id: courseId,
+          title: course?.title || 'Unknown Course',
+          category: course?.category || 'General',
           timestamp: Date.now(),
           files: []
         };
       }
       
-      if (!downloads[course.id].files.includes(type)) {
-        downloads[course.id].files.push(type);
+      if (!downloads[courseId].files.includes(type)) {
+        downloads[courseId].files.push(type);
       }
       
       await AsyncStorage.setItem('course_downloads', JSON.stringify(downloads));
@@ -145,39 +148,48 @@ export default function CourseDetails() {
   };
 
   const handleDownload = async () => {
-    if (!course || !course.pdfUrl) {
-      Alert.alert('Not Available', 'This course does not have a PDF material.');
+    if (!course) return;
+    
+    const pdfUri = course.pdfUrl || course.materialUrl; // Flexible for different field names
+    if (!pdfUri || !pdfUri.startsWith('http')) {
+      Alert.alert('Invalid URL', 'No valid PDF URL found for this course.');
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      window.open(pdfUri, '_blank');
       return;
     }
     
-    const docDir = FileSystem.documentDirectory;
-    if (!docDir) return;
+    const docDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+    if (!docDir) {
+      Alert.alert('Storage Error', 'Local file access is completely blocked on this device.');
+      return;
+    }
 
     setIsDownloading(true);
     setShowDownloadMenu(false);
     
     try {
-      const pdfUri = course.pdfUrl?.startsWith('http') 
-        ? course.pdfUrl 
-        : `https://raw.githubusercontent.com/dyglo/inuka/test-data/public/materials/${course.pdfUrl || 'dummy.pdf'}`;
-
       const fileUri = docDir + `course_${id}_material.pdf`;
       console.log('Starting PDF download from:', pdfUri);
       
-      const downloadResumable = FileSystem.createDownloadResumable(
-        pdfUri,
-        fileUri,
-        {}
+      const result = await FileSystem.downloadAsync(
+        encodeURI(pdfUri),
+        fileUri
       );
       
-      const result = await downloadResumable.downloadAsync();
-      
-      if (result && result.status === 200) {
-        await saveDownloadMetadata('pdf');
-        Alert.alert('Success', 'Material saved for offline use.');
-        setIsBookmarked(true);
+      if (result && (result.status === 200 || result.status === 206)) {
+        const fileInfo = await FileSystem.getInfoAsync(fileUri);
+        if (fileInfo.exists && fileInfo.size > 0) {
+          await saveDownloadMetadata('pdf');
+          Alert.alert('✅ Material Saved', 'The PDF has been saved for offline reading.');
+          setIsBookmarked(true);
+        } else {
+          throw new Error('PDF download finished but file is empty or missing.');
+        }
       } else {
-        throw new Error('Download failed with status ' + (result?.status || 'unknown'));
+        throw new Error(`Download failed with status ${result?.status}`);
       }
     } catch (e: any) {
       console.error('PDF Download Error:', e);
@@ -188,41 +200,103 @@ export default function CourseDetails() {
   };
 
   const handleDownloadVideo = async () => {
-    if (!course || !course.videoUrl) {
-      Alert.alert('Not Available', 'This course does not have a video available for download.');
+    if (!course) return;
+
+    const videoUri = course.videoUrl;
+    if (!videoUri.startsWith('http')) {
+      Alert.alert('Invalid URL', 'No valid video URL found for this course.');
       return;
     }
+
+    if (Platform.OS === 'web') {
+      // On Web, expo-file-system isn't supported, so we pop the URL open
+      window.open(videoUri, '_blank');
+      return;
+    }
+
+    // Safety net: If Expo constants are undefined (rare SDK bug), fallback to standard iOS paths
+    let docDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
     
-    const docDir = FileSystem.documentDirectory;
-    if (!docDir) return;
+    if (!docDir && Platform.OS === 'ios') {
+      console.log("⚠️ FileSystem constants missing. Attempting iOS hard-coded fallback.");
+      docDir = 'file:///var/mobile/Containers/Data/Application/Documents/'; 
+      // Note: This is a guess, but better than a crash. 
+      // However, usually undefined means the module is broken.
+    }
+    
+    if (!docDir) {
+      console.log("CRITICAL ERROR: FileSystem constants:", {
+        docDir: FileSystem.documentDirectory,
+        cacheDir: FileSystem.cacheDirectory,
+      });
+      
+      // FINAL FALLBACK: If we are truly blocked, use Linking to trigger external browser
+      console.log("Attempting Browser-style download fallback on Native...");
+      const { Linking } = require('react-native');
+      Linking.openURL(videoUri);
+      return;
+    }
 
     setIsDownloading(true);
     setShowDownloadMenu(false);
     
     try {
-      const videoUri = course.videoUrl?.startsWith('http') 
-        ? course.videoUrl 
-        : `https://raw.githubusercontent.com/dyglo/inuka/test-data/public/videos/${course.videoUrl}`;
-
       const fileUri = docDir + `course_${id}_video.mp4`;
       console.log('Starting Video download from:', videoUri);
       
-      const downloadResumable = FileSystem.createDownloadResumable(
-        videoUri,
-        fileUri,
-        {}
-      );
-
-      const result = await downloadResumable.downloadAsync();
-      if (result && result.status === 200) {
-        await saveDownloadMetadata('video');
-        Alert.alert('Success', 'Video downloaded successfully!');
-      } else {
-        throw new Error('Download failed with status ' + (result?.status || 'unknown'));
+      // Check if already downloaded
+      const existingFile = await FileSystem.getInfoAsync(fileUri);
+      if (existingFile.exists) {
+        Alert.alert(
+          'Already Downloaded',
+          'This video is already saved offline. Download again?',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => setIsDownloading(false) },
+            { text: 'Re-download', onPress: () => performVideoDownload(videoUri, fileUri) },
+          ]
+        );
+        return;
       }
+
+      await performVideoDownload(videoUri, fileUri);
     } catch (e: any) {
       console.error('Video Download Error:', e);
-      Alert.alert('Download Failed', 'Could not save video offline. Please check your connection.');
+      Alert.alert('Download Failed', e.message || 'Could not save video offline. Please check your connection.');
+      setIsDownloading(false);
+    }
+  };
+
+  const performVideoDownload = async (videoUri: string, fileUri: string) => {
+    try {
+      console.log('--- VIDEO DOWNLOAD START ---');
+      console.log('URL:', videoUri);
+      console.log('Dest:', fileUri);
+
+      // Do not encodeURI here! Firebase URLs already have %2F which would get double-encoded.
+      const result = await FileSystem.downloadAsync(videoUri, fileUri);
+      
+      if (result && (result.status === 200 || result.status === 206)) {
+        console.log('Download request successful, status:', result.status);
+        
+        // Verify file was actually saved
+        const fileInfo = await FileSystem.getInfoAsync(fileUri);
+        if (fileInfo.exists && fileInfo.size > 0) {
+          console.log('File verified on disk. Size:', fileInfo.size);
+          const metaSaved = await saveDownloadMetadata('video');
+          if (metaSaved) {
+            Alert.alert('✅ Download Complete', 'The video has been saved for offline viewing. You can find it in the Downloads tab.');
+          } else {
+            throw new Error('Could not save download record, but file is on disk.');
+          }
+        } else {
+          throw new Error('Download finished but file not found on disk or empty.');
+        }
+      } else {
+        throw new Error(`Download failed with status ${result?.status || 'unknown'}`);
+      }
+    } catch (e: any) {
+      console.error('CRITICAL DOWNLOAD ERROR:', e);
+      Alert.alert('Download Error', e.message || 'Could not download video. Please check your storage and connection.');
     } finally {
       setIsDownloading(false);
     }
@@ -358,14 +432,32 @@ export default function CourseDetails() {
 
             {showDownloadMenu && (
               <View style={styles.downloadMenu}>
-                <TouchableOpacity style={styles.menuItem} onPress={handleDownloadVideo}>
-                  <Play size={18} color={Colors.primary} />
-                  <Text style={styles.menuItemText}>Download Video</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.menuItem} onPress={handleDownload}>
-                  <FileText size={18} color={Colors.primary} />
-                  <Text style={styles.menuItemText}>Download PDF</Text>
-                </TouchableOpacity>
+                {isDownloading ? (
+                  <View style={styles.menuItem}>
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                    <Text style={styles.menuItemText}>Downloading...</Text>
+                  </View>
+                ) : (
+                  <>
+                    {course?.videoUrl && (
+                      <TouchableOpacity style={styles.menuItem} onPress={handleDownloadVideo}>
+                        <Download size={18} color={Colors.primary} />
+                        <Text style={styles.menuItemText}>Save Video Offline</Text>
+                      </TouchableOpacity>
+                    )}
+                    {course?.hasPdfMaterial && course?.pdfUrl && (
+                      <TouchableOpacity style={styles.menuItem} onPress={handleDownload}>
+                        <FileText size={18} color={Colors.primary} />
+                        <Text style={styles.menuItemText}>Save PDF Offline</Text>
+                      </TouchableOpacity>
+                    )}
+                    {!course?.videoUrl && !course?.pdfUrl && (
+                      <View style={styles.menuItem}>
+                        <Text style={styles.menuItemText}>No files to download</Text>
+                      </View>
+                    )}
+                  </>
+                )}
               </View>
             )}
           </View>
@@ -507,14 +599,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(15,15,30,0.3)',
   },
-  headerActions: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
   backButton: {
     width: 44,
     height: 44,
@@ -534,7 +618,7 @@ const styles = StyleSheet.create({
     width: 70,
     height: 70,
     borderRadius: 35,
-    backgroundColor: 'rgba(91, 60, 196, 0.9)', // Using primary color for a real button look
+    backgroundColor: 'rgba(26, 115, 232, 0.9)', // Using primary color for a real button look
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -616,7 +700,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(91, 60, 196, 0.8)',
+    backgroundColor: 'rgba(26, 115, 232, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',

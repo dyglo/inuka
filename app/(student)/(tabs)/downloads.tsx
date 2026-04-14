@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
 import { Colors } from '../../../src/theme/colors';
 import { Spacing, Typography } from '../../../src/theme';
 import { Download, FileText, Trash2, ExternalLink, Play, X } from 'lucide-react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, ResizeMode } from 'expo-av';
 import { Modal, ScrollView } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 
 interface OfflineFile {
   id: string;
@@ -23,7 +24,7 @@ export default function DownloadsScreen() {
 
   const loadFiles = async () => {
     try {
-      const docDir = FileSystem.documentDirectory;
+      const docDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
       if (!docDir) return;
 
       const downloadsStr = await AsyncStorage.getItem('course_downloads');
@@ -59,9 +60,12 @@ export default function DownloadsScreen() {
     }
   };
 
-  useEffect(() => {
-    loadFiles();
-  }, []);
+  // Reload files every time this tab is focused (so newly downloaded files appear)
+  useFocusEffect(
+    useCallback(() => {
+      loadFiles();
+    }, [])
+  );
 
   const handleOpenFile = async (file: OfflineFile) => {
     if (file.type === 'video') {
@@ -326,7 +330,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
   videoIconBg: {
-    backgroundColor: 'rgba(91, 60, 196, 0.15)',
+    backgroundColor: 'rgba(26, 115, 232, 0.15)',
   },
   playerContainer: {
     flex: 1,
