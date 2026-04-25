@@ -47,15 +47,6 @@ export const CourseCard: React.FC<CourseCardProps> = ({
       )}
 
       <View style={styles.body}>
-        {/* Category badge */}
-        {course.category && (
-          <View style={[styles.badge, featured ? styles.badgeFeatured : styles.badgeNormal]}>
-            <Text style={[styles.badgeText, featured ? styles.badgeTextFeatured : styles.badgeTextNormal]}>
-              {course.category}
-            </Text>
-          </View>
-        )}
-
         <Text
           style={[styles.title, featured ? styles.titleFeatured : styles.titleNormal]}
           numberOfLines={2}

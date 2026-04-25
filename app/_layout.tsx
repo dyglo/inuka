@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { AuthProvider, useAuth } from '../src/context/AuthContext';
+import { AuthProvider, useAuth, isAdminRole } from '../src/context/AuthContext';
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Colors } from '../src/theme/colors';
 
@@ -20,7 +20,7 @@ const InukaLightTheme = {
 };
 
 function RootLayoutNav() {
-  const { user, loading, role } = useAuth();
+  const { user, loading, role, profile } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -30,25 +30,37 @@ function RootLayoutNav() {
     const inAuthGroup = segments[0] === '(auth)';
     const inStudentGroup = segments[0] === '(student)';
     const inAdminGroup = segments[0] === '(admin)';
-    const onOnboarding = segments.length === 0 || segments[0] === undefined;
+    const onSplash = !segments || segments.length < 1 || segments[0] === undefined;
+    // Detect if we're currently on the onboarding screen itself
+    const inOnboarding = inStudentGroup && segments[1] === 'onboarding';
 
-    if (!user && !inAuthGroup && !onOnboarding) {
-      // Not authenticated and trying to access protected routes → go to login
+    if (!user && !inAuthGroup && !onSplash) {
+      // Not authenticated → force to login
       router.replace('/login');
-    } else if (user && (inAuthGroup || onOnboarding)) {
-      // Authenticated and on auth or onboarding screen → redirect to dashboard
-      if (role === 'admin') {
+    } else if (user && (inAuthGroup || onSplash)) {
+      // Authenticated user on the splash/auth screens → route by role
+      if (isAdminRole(role)) {
         router.replace('/(admin)/(tabs)');
       } else if (role === 'student') {
-        router.replace('/(student)/(tabs)');
+        if (!profile) return; // still loading Firestore doc — wait
+        if (profile.onboardingComplete === false) {
+          router.replace('/(student)/onboarding');
+        } else {
+          router.replace('/(student)/(tabs)');
+        }
       }
-      // If role is null (still loading from Firestore), stay put
+      // role === null → Firestore doc still loading, stay put
+    } else if (user && role === 'student' && inStudentGroup && !inOnboarding) {
+      // Student navigated into their area — enforce onboarding gate
+      if (profile && profile.onboardingComplete === false) {
+        router.replace('/(student)/onboarding');
+      }
     } else if (user && role === 'student' && inAdminGroup) {
       router.replace('/(student)/(tabs)');
-    } else if (user && role === 'admin' && inStudentGroup) {
+    } else if (user && isAdminRole(role) && inStudentGroup) {
       router.replace('/(admin)/(tabs)');
     }
-  }, [user, loading, role, segments, router]);
+  }, [user, loading, role, profile, segments, router]);
 
   return (
     <Stack screenOptions={{ headerShown: false }}>

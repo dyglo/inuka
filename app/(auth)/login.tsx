@@ -1,20 +1,20 @@
+import { useRouter } from 'expo-router';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  StyleSheet,
+  Text,
   TouchableOpacity,
+  View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
-import { Colors } from '../../src/theme/colors';
-import { Spacing, Typography } from '../../src/theme';
-import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../../src/config/firebase';
+import { Spacing, Typography } from '../../src/theme';
+import { Colors } from '../../src/theme/colors';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -38,7 +38,11 @@ export default function LoginScreen() {
     } catch (err: any) {
       console.error(err);
       let msg = 'Failed to sign in';
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+      if (
+        err.code === 'auth/user-not-found' ||
+        err.code === 'auth/wrong-password' ||
+        err.code === 'auth/invalid-credential'
+      ) {
         msg = 'Invalid email or password';
       } else if (err.code === 'auth/too-many-requests') {
         msg = 'Too many failed attempts. Please try again later.';
@@ -48,7 +52,6 @@ export default function LoginScreen() {
       setLoading(false);
     }
   };
-
 
   return (
     <KeyboardAvoidingView
@@ -95,14 +98,13 @@ export default function LoginScreen() {
             style={styles.loginButton}
           />
 
-          {/* Sign Up link — FIXED */}
+          {/* Sign Up link */}
           <View style={styles.footer}>
             <Text style={styles.footerText}>Don't have an account? </Text>
             <TouchableOpacity onPress={() => router.push('/register')}>
               <Text style={styles.linkText}>Sign Up</Text>
             </TouchableOpacity>
           </View>
-
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

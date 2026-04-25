@@ -1,21 +1,38 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged, User, signOut as firebaseSignOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
-export type Role = 'student' | 'admin' | null;
+// ─── Role Types ──────────────────────────────────────────────────────────────
+export type Role = 'student' | 'teacher_admin' | 'super_admin' | null;
 
-interface UserProfile {
+export const isAdminRole = (role: Role): boolean =>
+  role === 'teacher_admin' || role === 'super_admin';
+
+export const isSuperAdmin = (role: Role): boolean => role === 'super_admin';
+
+// ─── User Profile ─────────────────────────────────────────────────────────────
+export interface UserProfile {
   uid: string;
   fullName: string;
   email: string;
   role: Role;
+  isDisabled: boolean;
   avatarUrl: string;
   enrolledCourseCount: number;
   totalLearningMinutes: number;
+  lastLoginAt?: any;  // Firestore Timestamp — written on each sign-in session
   createdAt?: any;
+  // ── Onboarding fields (Phase 4) ──
+  onboardingComplete?: boolean;
+  dateOfBirth?: string;
+  learningPreferences?: {
+    subjects: string[];
+    sessionLength: string; // e.g. '15min' | '30min' | '60min'
+  };
 }
 
+// ─── Context Shape ────────────────────────────────────────────────────────────
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
@@ -26,11 +43,14 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// ─── Provider ─────────────────────────────────────────────────────────────────
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<Role>(null);
   const [loading, setLoading] = useState(true);
+  // Track whether we've already stamped lastLoginAt for this session
+  const loginStampedRef = useRef<string | null>(null);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | undefined;
@@ -39,22 +59,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(firebaseUser);
 
       if (firebaseUser) {
-        // Start profile sync
-        unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), async (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.data() as UserProfile;
-            setProfile(data);
-            setRole(data.role);
+        // Real-time profile sync
+        unsubscribeProfile = onSnapshot(
+          doc(db, 'users', firebaseUser.uid),
+          async (snapshot) => {
+            if (snapshot.exists()) {
+              const data = snapshot.data() as UserProfile;
+              setProfile(data);
+              setRole(data.role);
+              setLoading(false);
+
+              // Stamp lastLoginAt once per UID per app session
+              if (loginStampedRef.current !== firebaseUser.uid) {
+                loginStampedRef.current = firebaseUser.uid;
+                try {
+                  await updateDoc(doc(db, 'users', firebaseUser.uid), {
+                    lastLoginAt: serverTimestamp(),
+                  });
+                } catch (_) {
+                  // Non-critical — ignore
+                }
+              }
+            } else {
+              // First time: create the document
+              await initializeUserDoc(firebaseUser);
+            }
+          },
+          (error) => {
+            console.error('Profile snapshot error:', error);
+            // If it's a permission error, we might still be loading or auth failed
+            if (error.code === 'permission-denied') {
+              // Stay in loading state or handle accordingly
+            }
             setLoading(false);
-          } else {
-            // Document might not exist yet if just registered, create it
-            await initializeUserDoc(firebaseUser);
           }
-        });
+        );
       } else {
         setProfile(null);
         setRole(null);
         setLoading(false);
+        loginStampedRef.current = null; // Reset so next login stamps again
         if (unsubscribeProfile) unsubscribeProfile();
       }
     });
@@ -69,16 +113,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const userRef = doc(db, 'users', firebaseUser.uid);
       const userDoc = await getDoc(userRef);
-      
+
       if (!userDoc.exists()) {
         const newProfile: UserProfile = {
           uid: firebaseUser.uid,
           fullName: firebaseUser.displayName || '',
           email: firebaseUser.email || '',
           role: 'student',
+          isDisabled: false,
           avatarUrl: firebaseUser.photoURL || '',
           enrolledCourseCount: 0,
           totalLearningMinutes: 0,
+          onboardingComplete: false,
           createdAt: serverTimestamp(),
         };
         await setDoc(userRef, newProfile);
@@ -103,6 +149,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
+// ─── Hook ──────────────────────────────────────────────────────────────────────
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {

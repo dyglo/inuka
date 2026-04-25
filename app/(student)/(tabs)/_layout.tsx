@@ -3,8 +3,13 @@ import { Tabs } from 'expo-router';
 import { Home, BookOpen, Download, User } from 'lucide-react-native';
 import { Colors } from '../../../src/theme/colors';
 import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabsLayout() {
+  // Android edge-to-edge is enabled in app.json — apply nav bar inset to tab bar
+  const insets = useSafeAreaInsets();
+  const androidBottomPad = Platform.OS === 'android' ? insets.bottom : 0;
+
   return (
     <Tabs
       screenOptions={{
@@ -18,8 +23,9 @@ export default function TabsLayout() {
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.06,
           shadowRadius: 8,
-          height: Platform.OS === 'ios' ? 80 : 68,
-          paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+          // iOS uses fixed height; Android adds nav bar inset dynamically
+          height: Platform.OS === 'ios' ? 80 : 60 + androidBottomPad,
+          paddingBottom: Platform.OS === 'ios' ? 20 : androidBottomPad,
           paddingTop: 8,
         },
         tabBarActiveTintColor: Colors.primary,

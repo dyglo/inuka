@@ -12,7 +12,7 @@ import {
 import { Platform } from 'react-native';
 
 // Firebase configuration for inuka-db project
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: 'AIzaSyB4RcbpaALO4m45G9Wwi95fcBKCHjV3uiw',
   authDomain: 'inuka-db.firebaseapp.com',
   databaseURL: 'https://inuka-db-default-rtdb.firebaseio.com',
