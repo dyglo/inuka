@@ -39,6 +39,7 @@ interface AuthContextType {
   role: Role;
   loading: boolean;
   signOut: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -134,6 +135,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshUser = async () => {
+    if (auth.currentUser) {
+      await auth.currentUser.reload();
+      const cloned = Object.create(
+        Object.getPrototypeOf(auth.currentUser),
+        Object.getOwnPropertyDescriptors(auth.currentUser)
+      );
+      setUser(cloned);
+    }
+  };
+
   const signOut = async () => {
     try {
       await firebaseSignOut(auth);
@@ -143,7 +155,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, role, loading, signOut }}>
+    <AuthContext.Provider value={{ user, profile, role, loading, signOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

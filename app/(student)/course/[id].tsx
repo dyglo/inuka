@@ -92,12 +92,18 @@ export default function CourseDetails() {
 
     if (user) {
       const enrollmentId = `${user.uid}_${id}`;
-      const unsubscribe = onSnapshot(doc(db, 'enrollments', enrollmentId), (snap) => {
-        setIsEnrolled(snap.exists());
-        if (snap.exists()) {
-          setCourseProgress(snap.data()?.progress || 0);
+      const unsubscribe = onSnapshot(
+        doc(db, 'enrollments', enrollmentId),
+        (snap) => {
+          setIsEnrolled(snap.exists());
+          if (snap.exists()) {
+            setCourseProgress(snap.data()?.progress || 0);
+          }
+        },
+        (error) => {
+          console.error('Enrollment snapshot error:', error);
         }
-      });
+      );
       return () => unsubscribe();
     }
   }, [id, user]);

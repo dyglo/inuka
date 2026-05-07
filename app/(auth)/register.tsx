@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { createUserWithEmailAndPassword, updateProfile, sendEmailVerification } from 'firebase/auth';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { Crown, GraduationCap, ShieldCheck } from 'lucide-react-native';
+import { Crown, GraduationCap, ShieldCheck, Eye, EyeOff, Check, X, AlertCircle } from 'lucide-react-native';
 import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -24,14 +24,25 @@ const TEACHER_ADMIN_CODE = 'INUKA-TEACH-2024';
 const SUPER_ADMIN_CODE = 'INUKA-SUPER-9999';
 
 // ─── Email domain validation ─────────────────────────────────────────────────
-// Accept only well-known providers plus any domain with a valid TLD
 const VALID_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
-// Reject obviously fake/disposable TLDs and single-char domains
-const DISPOSABLE_DOMAINS = [
-  'mailinator.com', 'guerrillamail.com', 'trashmail.com', 'temp-mail.org',
-  'fakeinbox.com', 'yopmail.com', 'sharklasers.com', 'guerrillamailblock.com',
-  'grr.la', 'guerrillamail.info', 'spam4.me', 'throwam.com',
-];
+
+function detectGmailTypo(email: string): string | null {
+  const parts = email.trim().toLowerCase().split('@');
+  if (parts.length !== 2) return null;
+  const [local, domain] = parts;
+  
+  const typos = [
+    'gamil.com', 'gmal.com', 'gmaill.com', 'gmeil.com', 'gmaul.com', 'gmai.com', 
+    'gmil.com', 'gimail.com', 'gamil.co', 'gmal.co', 'gmail.co', 'gmail.con', 
+    'gamil.con', 'gmail.coms', 'gmail.cm', 'gml.com', 'gma.com', 'gail.com',
+    'gmall.com', 'gmaii.com', 'gmaili.com', 'gmaill.co'
+  ];
+  
+  if (typos.includes(domain)) {
+    return `${local}@gmail.com`;
+  }
+  return null;
+}
 
 function validateEmailDomain(email: string): { valid: boolean; error?: string } {
   const trimmed = email.trim().toLowerCase();
@@ -42,18 +53,8 @@ function validateEmailDomain(email: string): { valid: boolean; error?: string } 
 
   const domain = trimmed.split('@')[1];
 
-  if (DISPOSABLE_DOMAINS.includes(domain)) {
-    return { valid: false, error: 'Disposable email addresses are not allowed. Use a real email.' };
-  }
-
-  // Ensure domain has at least one dot in the right place (catches "abc@gmail" etc.)
-  if (!domain.includes('.')) {
-    return { valid: false, error: 'Please enter a valid email address.' };
-  }
-
-  const tld = domain.split('.').pop() || '';
-  if (tld.length < 2) {
-    return { valid: false, error: 'Please enter a valid email address.' };
+  if (domain !== 'gmail.com') {
+    return { valid: false, error: 'Only Gmail accounts (@gmail.com) are allowed to register.' };
   }
 
   return { valid: true };
@@ -103,8 +104,11 @@ export default function RegisterScreen() {
 
   // Shared fields
   const [email, setEmail] = useState('');
+  const [confirmEmail, setConfirmEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [selectedRole, setSelectedRole] = useState<Role>('student');
 
   // Admin-only fields
@@ -113,6 +117,19 @@ export default function RegisterScreen() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Live validation calculations
+  const typoSuggestion = detectGmailTypo(email);
+
+  const pwdRules = {
+    length: password.length >= 12,
+    lowercase: /[a-z]/.test(password),
+    uppercase: /[A-Z]/.test(password),
+    number: /[0-9]/.test(password),
+    symbol: /[^A-Za-z0-9]/.test(password),
+  };
+  const metCount = Object.values(pwdRules).filter(Boolean).length;
+  const isPasswordValid = metCount === 5;
 
   const selectedType = ACCOUNT_TYPES.find((t) => t.role === selectedRole)!;
   const isAdmin = selectedRole === 'teacher_admin' || selectedRole === 'super_admin';
@@ -134,7 +151,7 @@ export default function RegisterScreen() {
     setError(null);
 
     // Validate shared fields
-    if (!email || !password || !confirmPassword) {
+    if (!email || !confirmEmail || !password || !confirmPassword) {
       setError('Please fill in all fields');
       return;
     }
@@ -146,12 +163,18 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
+    if (email.trim().toLowerCase() !== confirmEmail.trim().toLowerCase()) {
+      setError('Email addresses do not match');
       return;
     }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+
+    if (!isPasswordValid) {
+      setError('Password must be at least 12 characters and include uppercase, lowercase, numbers, and symbols.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
       return;
     }
 
@@ -193,7 +216,13 @@ export default function RegisterScreen() {
         createdAt: serverTimestamp(),
       });
 
-      // AuthContext onAuthStateChanged will route student → onboarding, admin → dashboard
+      // Send verification email
+      try {
+        await sendEmailVerification(user);
+      } catch (verifErr) {
+        console.error('Error sending email verification:', verifErr);
+      }
+
     } catch (err: any) {
       console.error('Registration error:', err);
       let msg = 'Failed to create account';
@@ -202,7 +231,7 @@ export default function RegisterScreen() {
       } else if (err.code === 'auth/invalid-email') {
         msg = 'Invalid email address';
       } else if (err.code === 'auth/weak-password') {
-        msg = 'Password is too weak — use at least 6 characters';
+        msg = 'Password is too weak';
       }
       setError(msg);
     } finally {
@@ -332,19 +361,142 @@ export default function RegisterScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
           />
+
+          {typoSuggestion && (
+            <TouchableOpacity
+              style={styles.suggestionBanner}
+              onPress={() => {
+                setEmail(typoSuggestion);
+                setError(null);
+              }}
+              activeOpacity={0.8}
+            >
+              <AlertCircle size={14} color={Colors.primary} style={styles.suggestionIcon} />
+              <Text style={styles.suggestionText}>
+                Did you mean <Text style={styles.suggestionHighlight}>{typoSuggestion}</Text>? Tap to apply
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          <Input
+            label="Confirm Email Address"
+            placeholder="Re-enter your you@gmail.com"
+            value={confirmEmail}
+            onChangeText={(t) => { setConfirmEmail(t); setError(null); }}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+
           <Input
             label="Password"
-            placeholder="At least 6 characters"
+            placeholder="At least 12 characters"
             value={password}
-            onChangeText={setPassword}
-            secureTextEntry
+            onChangeText={(t) => { setPassword(t); setError(null); }}
+            secureTextEntry={!showPassword}
+            rightAccessory={
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
+                {showPassword ? (
+                  <EyeOff size={20} color={Colors.textMuted} />
+                ) : (
+                  <Eye size={20} color={Colors.textMuted} />
+                )}
+              </TouchableOpacity>
+            }
           />
+
+          {password.length > 0 && (
+            <View style={styles.strengthContainer}>
+              <View style={styles.strengthHeader}>
+                <Text style={styles.strengthLabel}>Password Strength:</Text>
+                <Text style={[
+                  styles.strengthText,
+                  metCount <= 2 && { color: Colors.error },
+                  metCount > 2 && metCount < 5 && { color: '#d97706' },
+                  metCount === 5 && { color: '#059669' },
+                ]}>
+                  {metCount <= 2 ? 'Weak' : metCount < 5 ? 'Medium' : 'Very Strong'}
+                </Text>
+              </View>
+              <View style={styles.progressBarBg}>
+                <View style={[
+                  styles.progressBarFill,
+                  { width: `${(metCount / 5) * 100}%` },
+                  metCount <= 2 && { backgroundColor: Colors.error },
+                  metCount > 2 && metCount < 5 && { backgroundColor: '#d97706' },
+                  metCount === 5 && { backgroundColor: '#059669' },
+                ]} />
+              </View>
+
+              <View style={styles.checklist}>
+                <View style={styles.checkItem}>
+                  {pwdRules.length ? (
+                    <Check size={12} color="#059669" />
+                  ) : (
+                    <X size={12} color={Colors.error} />
+                  )}
+                  <Text style={[styles.checkText, pwdRules.length && styles.checkTextMet]}>
+                    At least 12 characters
+                  </Text>
+                </View>
+                <View style={styles.checkItem}>
+                  {pwdRules.lowercase ? (
+                    <Check size={12} color="#059669" />
+                  ) : (
+                    <X size={12} color={Colors.error} />
+                  )}
+                  <Text style={[styles.checkText, pwdRules.lowercase && styles.checkTextMet]}>
+                    At least one lowercase letter (a-z)
+                  </Text>
+                </View>
+                <View style={styles.checkItem}>
+                  {pwdRules.uppercase ? (
+                    <Check size={12} color="#059669" />
+                  ) : (
+                    <X size={12} color={Colors.error} />
+                  )}
+                  <Text style={[styles.checkText, pwdRules.uppercase && styles.checkTextMet]}>
+                    At least one uppercase letter (A-Z)
+                  </Text>
+                </View>
+                <View style={styles.checkItem}>
+                  {pwdRules.number ? (
+                    <Check size={12} color="#059669" />
+                  ) : (
+                    <X size={12} color={Colors.error} />
+                  )}
+                  <Text style={[styles.checkText, pwdRules.number && styles.checkTextMet]}>
+                    At least one number (0-9)
+                  </Text>
+                </View>
+                <View style={styles.checkItem}>
+                  {pwdRules.symbol ? (
+                    <Check size={12} color="#059669" />
+                  ) : (
+                    <X size={12} color={Colors.error} />
+                  )}
+                  <Text style={[styles.checkText, pwdRules.symbol && styles.checkTextMet]}>
+                    At least one symbol (special character)
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
           <Input
             label="Confirm Password"
             placeholder="Re-enter your password"
             value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
+            onChangeText={(t) => { setConfirmPassword(t); setError(null); }}
+            secureTextEntry={!showConfirmPassword}
+            rightAccessory={
+              <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeButton}>
+                {showConfirmPassword ? (
+                  <EyeOff size={20} color={Colors.textMuted} />
+                ) : (
+                  <Eye size={20} color={Colors.textMuted} />
+                )}
+              </TouchableOpacity>
+            }
           />
 
           {error && <Text style={styles.errorText}>{error}</Text>}
@@ -552,6 +704,88 @@ const styles = StyleSheet.create({
   linkText: {
     ...Typography.bodySmall,
     color: Colors.primary,
+    fontWeight: '600',
+  },
+  suggestionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primaryLight,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.2)',
+    borderRadius: 12,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs + 2,
+    marginTop: -Spacing.xs,
+    marginBottom: Spacing.sm,
+    gap: 6,
+  },
+  suggestionIcon: {
+    marginTop: 1,
+  },
+  suggestionText: {
+    ...Typography.bodySmall,
+    color: Colors.text,
+    fontSize: 12,
+    flex: 1,
+  },
+  suggestionHighlight: {
+    fontWeight: '700',
+    color: Colors.primary,
+    textDecorationLine: 'underline',
+  },
+  eyeButton: {
+    padding: Spacing.xs,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  strengthContainer: {
+    backgroundColor: Colors.surfaceLight,
+    borderRadius: 16,
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+  },
+  strengthHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.xs + 2,
+  },
+  strengthLabel: {
+    ...Typography.bodySmall,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  strengthText: {
+    ...Typography.bodySmall,
+    fontWeight: '700',
+  },
+  progressBarBg: {
+    height: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 3,
+    marginBottom: Spacing.md,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  checklist: {
+    gap: Spacing.xs,
+  },
+  checkItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  checkText: {
+    ...Typography.caption,
+    color: Colors.textMuted,
+  },
+  checkTextMet: {
+    color: '#059669',
     fontWeight: '600',
   },
 });
