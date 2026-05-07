@@ -33,10 +33,16 @@ function RootLayoutNav() {
     const onSplash = !segments || segments.length < 1 || segments[0] === undefined;
     // Detect if we're currently on the onboarding screen itself
     const inOnboarding = inStudentGroup && segments[1] === 'onboarding';
+    const inVerifyScreen = inAuthGroup && segments[1] === 'verify';
 
     if (!user && !inAuthGroup && !onSplash) {
       // Not authenticated → force to login
       router.replace('/login');
+    } else if (user && !user.emailVerified) {
+      // Authenticated but unverified email → force to verification screen
+      if (!inVerifyScreen) {
+        router.replace('/(auth)/verify');
+      }
     } else if (user && (inAuthGroup || onSplash)) {
       // Authenticated user on the splash/auth screens → route by role
       if (isAdminRole(role)) {

@@ -7,9 +7,10 @@ interface InputProps extends TextInputProps {
   label?: string;
   error?: string;
   containerStyle?: ViewStyle;
+  rightAccessory?: React.ReactNode;
 }
 
-export const Input: React.FC<InputProps> = ({ label, error, containerStyle, style, multiline, ...props }) => {
+export const Input: React.FC<InputProps> = ({ label, error, containerStyle, style, multiline, rightAccessory, ...props }) => {
   return (
     <View style={[styles.container, containerStyle]}>
       {label && <Text style={styles.label}>{label}</Text>}
@@ -17,11 +18,13 @@ export const Input: React.FC<InputProps> = ({ label, error, containerStyle, styl
         styles.inputContainer, 
         error ? styles.inputError : null,
         multiline ? styles.multilineContainer : null,
+        rightAccessory ? styles.rowContainer : null,
       ]}>
         <TextInput
           style={[
             styles.input, 
             multiline ? styles.multilineInput : null,
+            rightAccessory ? styles.flexInput : null,
             style,
           ]}
           placeholderTextColor={Colors.textMuted}
@@ -30,6 +33,7 @@ export const Input: React.FC<InputProps> = ({ label, error, containerStyle, styl
           textAlignVertical={multiline ? 'top' : 'auto'}
           {...props}
         />
+        {rightAccessory && <View style={styles.accessory}>{rightAccessory}</View>}
       </View>
       {error && <Text style={styles.errorText}>{error}</Text>}
     </View>
@@ -76,5 +80,18 @@ const styles = StyleSheet.create({
     ...Typography.caption,
     color: Colors.error,
     marginTop: Spacing.xs,
+  },
+  rowContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: Spacing.sm,
+  },
+  flexInput: {
+    flex: 1,
+  },
+  accessory: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: Spacing.xs,
   },
 });

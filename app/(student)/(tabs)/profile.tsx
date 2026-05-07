@@ -78,9 +78,15 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     if (!user) return;
-    const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (snap) => {
-      if (snap.exists()) setUserData(snap.data());
-    });
+    const unsubscribe = onSnapshot(
+      doc(db, 'users', user.uid),
+      (snap) => {
+        if (snap.exists()) setUserData(snap.data());
+      },
+      (error) => {
+        console.error('User profile snapshot error:', error);
+      }
+    );
     return () => unsubscribe();
   }, [user]);
 
