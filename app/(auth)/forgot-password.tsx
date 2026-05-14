@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -16,36 +16,33 @@ import { auth } from '../../src/config/firebase';
 import { Spacing, Typography } from '../../src/theme';
 import { Colors } from '../../src/theme/colors';
 
-export default function LoginScreen() {
+export default function ForgotPasswordScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      setError('Please enter both email and password');
+  const handleResetPassword = async () => {
+    if (!email) {
+      setError('Please enter your email address');
       return;
     }
 
     setLoading(true);
     setError(null);
+    setSuccess(false);
 
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-      // AuthContext will handle routing based on role
+      await sendPasswordResetEmail(auth, email.trim());
+      setSuccess(true);
     } catch (err: any) {
       console.error(err);
-      let msg = 'Failed to sign in';
-      if (
-        err.code === 'auth/user-not-found' ||
-        err.code === 'auth/wrong-password' ||
-        err.code === 'auth/invalid-credential'
-      ) {
-        msg = 'Invalid email or password';
-      } else if (err.code === 'auth/too-many-requests') {
-        msg = 'Too many failed attempts. Please try again later.';
+      let msg = 'Failed to send reset email';
+      if (err.code === 'auth/user-not-found') {
+        msg = 'No user found with this email address';
+      } else if (err.code === 'auth/invalid-email') {
+        msg = 'Invalid email address';
       }
       setError(msg);
     } finally {
@@ -62,14 +59,15 @@ export default function LoginScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Logo */}
         <View style={styles.header}>
           <View style={styles.logoMark}>
             <Text style={styles.logoMarkText}>I</Text>
           </View>
           <Text style={styles.logoText}>INUKA</Text>
-          <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>Sign in to continue your learning journey</Text>
+          <Text style={styles.title}>Reset Password</Text>
+          <Text style={styles.subtitle}>
+            Enter your email and we'll send you a link to reset your password
+          </Text>
         </View>
 
         <View style={styles.form}>
@@ -81,37 +79,29 @@ export default function LoginScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
           />
-          <Input
-            label="Password"
-            placeholder="••••••••"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
+
+          {error && <Text style={styles.errorText}>{error}</Text>}
+          {success && (
+            <View style={styles.successContainer}>
+              <Text style={styles.successText}>
+                Password reset email sent! Please check your inbox.
+              </Text>
+            </View>
+          )}
+
+          <Button
+            title={success ? "Resend Link" : "Send Reset Link"}
+            onPress={handleResetPassword}
+            loading={loading}
+            style={styles.resetButton}
           />
 
           <TouchableOpacity 
-            onPress={() => router.push('/forgot-password' as any)}
-            style={styles.forgotPasswordContainer}
+            onPress={() => router.back()}
+            style={styles.backButton}
           >
-            <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+            <Text style={styles.backButtonText}>Back to Login</Text>
           </TouchableOpacity>
-
-          {error && <Text style={styles.errorText}>{error}</Text>}
-
-          <Button
-            title="Sign In"
-            onPress={handleLogin}
-            loading={loading}
-            style={styles.loginButton}
-          />
-
-          {/* Sign Up link */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={() => router.push('/register')}>
-              <Text style={styles.linkText}>Sign Up</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -169,11 +159,12 @@ const styles = StyleSheet.create({
     ...Typography.body,
     color: Colors.textSecondary,
     textAlign: 'center',
+    paddingHorizontal: Spacing.md,
   },
   form: {
     marginTop: Spacing.md,
   },
-  loginButton: {
+  resetButton: {
     marginTop: Spacing.lg,
     backgroundColor: Colors.primary,
     shadowColor: Colors.primary,
@@ -186,33 +177,30 @@ const styles = StyleSheet.create({
     color: Colors.error,
     ...Typography.bodySmall,
     textAlign: 'center',
-    marginBottom: Spacing.md,
+    marginTop: Spacing.sm,
     padding: Spacing.sm,
     backgroundColor: 'rgba(239, 68, 68, 0.08)',
     borderRadius: 12,
   },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: Spacing.xl,
+  successContainer: {
+    marginTop: Spacing.sm,
+    padding: Spacing.md,
+    backgroundColor: 'rgba(34, 197, 94, 0.08)',
+    borderRadius: 12,
   },
-  footerText: {
+  successText: {
+    color: '#15803d',
+    ...Typography.bodySmall,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  backButton: {
+    marginTop: Spacing.xl,
+    alignItems: 'center',
+  },
+  backButtonText: {
     ...Typography.bodySmall,
     color: Colors.textSecondary,
-  },
-  linkText: {
-    ...Typography.bodySmall,
-    color: Colors.primary,
-    fontWeight: '700',
-  },
-  forgotPasswordContainer: {
-    alignSelf: 'flex-end',
-    marginTop: Spacing.xs,
-    marginBottom: Spacing.md,
-  },
-  forgotPasswordText: {
-    ...Typography.bodySmall,
-    color: Colors.primary,
     fontWeight: '600',
   },
 });
